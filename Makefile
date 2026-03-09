@@ -88,7 +88,6 @@ airflow-trigger-dev:
 	fi
 	cd airflow && docker compose exec airflow-webserver \
 	  airflow dags trigger latam_roles_pipeline \
-	  --conf "$$(printf '{\"position_id\": \"%s\", \"start_date\": \"%s\", \"end_date\": \"%s\"}' \"$$POSITION_ID\" \"$$START_DATE\" \"$$END_DATE\")"
-
+	  --conf "$$(printf '{"position_id":"%s","start_date":"%s","end_date":"%s"}' "$$POSITION_ID" "$$START_DATE" "$$END_DATE")"
 
 

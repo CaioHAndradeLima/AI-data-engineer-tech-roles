@@ -44,7 +44,10 @@ def _load_position_from_config(position_id: str):
   """
   Load a single position definition from positions.json by id.
   """
-  positions_config_path = os.environ.get("POSITIONS_CONFIG", "positions.json")
+  # Prefer explicit env var, then container project mount path, then local path.
+  positions_config_path = os.environ.get(
+    "POSITIONS_CONFIG", "/opt/airflow/project/positions.json"
+  )
   with open(positions_config_path, "r", encoding="utf-8") as f:
     config = json.load(f)
 
@@ -194,4 +197,3 @@ with DAG(
   )
 
   run_task >> slack_success
-
