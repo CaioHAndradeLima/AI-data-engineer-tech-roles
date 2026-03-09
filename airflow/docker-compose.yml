@@ -1,0 +1,78 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  airflow-init:
+    build:
+      context: ..
+      dockerfile: airflow/Dockerfile
+    env_file:
+      - ../.env.dev
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      # Static example Fernet key (32 url-safe base64-encoded bytes)
+      AIRFLOW__CORE__FERNET_KEY: "M5o0dqs3p3dkhLvpz5c5Ny8x7BqXc9E8uK1k0vZL3lU="
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      PYTHONPATH: /opt/airflow/project
+    depends_on:
+      - postgres
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+      - ../:/opt/airflow/project
+    entrypoint: >
+      /bin/bash -c "airflow db init &&
+      airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin"
+
+  airflow-webserver:
+    build:
+      context: ..
+      dockerfile: airflow/Dockerfile
+    env_file:
+      - ../.env.dev
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: "M5o0dqs3p3dkhLvpz5c5Ny8x7BqXc9E8uK1k0vZL3lU="
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__WEBSERVER__RBAC: "True"
+      PYTHONPATH: /opt/airflow/project
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+      - ../:/opt/airflow/project
+    command: webserver
+
+  airflow-scheduler:
+    build:
+      context: ..
+      dockerfile: airflow/Dockerfile
+    env_file:
+      - ../.env.dev
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: "M5o0dqs3p3dkhLvpz5c5Ny8x7BqXc9E8uK1k0vZL3lU="
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      PYTHONPATH: /opt/airflow/project
+    depends_on:
+      - postgres
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+      - ../:/opt/airflow/project
+    command: scheduler
+
+volumes:
+  postgres_data:
+

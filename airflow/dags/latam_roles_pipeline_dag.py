@@ -10,32 +10,40 @@ from airflow.operators.python import PythonOperator
 from pipeline import run_pipeline
 
 
-def _compute_dates_from_conf_or_previous_month(**context):
+def _get_required_params_from_conf(**context):
   """
-  Determine start/end date for the run.
-  Priority:
-  1) dag_run.conf["start_date"] / ["end_date"] if provided (YYYY-MM-DD)
-  2) Previous full calendar month based on execution date.
+  Read required parameters from dag_run.conf.
+  Expected keys (all required):
+    - start_date (YYYY-MM-DD)
+    - end_date (YYYY-MM-DD)
+    - position_id (must exist in positions.json)
   """
   dag_run = context.get("dag_run")
-  if dag_run and dag_run.conf:
-    start = dag_run.conf.get("start_date")
-    end = dag_run.conf.get("end_date")
-    if start and end:
-      return start, end
+  conf = getattr(dag_run, "conf", {}) or {}
 
-  # Default: previous full calendar month
-  exec_date = context["logical_date"]  # pendulum DateTime
-  first_of_current_month = exec_date.replace(day=1)
-  last_month_end = first_of_current_month - pendulum.duration(days=1)
-  last_month_start = last_month_end.replace(day=1)
+  start_date = conf.get("start_date")
+  end_date = conf.get("end_date")
+  position_id = conf.get("position_id")
 
-  return last_month_start.to_date_string(), last_month_end.to_date_string()
+  missing = [k for k, v in [
+    ("start_date", start_date),
+    ("end_date", end_date),
+    ("position_id", position_id),
+  ] if not v]
+
+  if missing:
+    raise RuntimeError(
+      f"Missing required dag_run.conf params: {', '.join(missing)}. "
+      "Provide them when triggering the DAG."
+    )
+
+  return start_date, end_date, position_id
 
 
-def run_latam_roles_pipeline(**context):
-  start_date, end_date = _compute_dates_from_conf_or_previous_month(**context)
-
+def _load_position_from_config(position_id: str):
+  """
+  Load a single position definition from positions.json by id.
+  """
   positions_config_path = os.environ.get("POSITIONS_CONFIG", "positions.json")
   with open(positions_config_path, "r", encoding="utf-8") as f:
     config = json.load(f)
@@ -44,36 +52,54 @@ def run_latam_roles_pipeline(**context):
   if not positions:
     raise RuntimeError(f"No positions found in {positions_config_path}")
 
-  results_summary = {"positions": [], "total_positions": 0}
-
   for item in positions:
-    position_id = item.get("id")
-    name = item.get("name")
-    extra_terms = item.get("extra_terms")
-    if not position_id or not name:
-      continue
+    if item.get("id") == position_id:
+      return item
 
-    result = run_pipeline(
-      position=name,
-      start_date=start_date,
-      end_date=end_date,
-      extra_terms=extra_terms,
-      position_id=position_id,
-      write_to_s3=True,
-    )
+  raise RuntimeError(
+    f"Position id '{position_id}' not found in {positions_config_path}"
+  )
 
-    total = int(result.get("total_positions", 0) or 0)
-    results_summary["positions"].append(
-      {
-        "id": position_id,
-        "name": name,
-        "total_positions": total,
-        "storage": result.get("storage"),
-      }
-    )
-    results_summary["total_positions"] += total
 
-  # Push summary to XCom for Slack notifications
+def run_latam_roles_pipeline(**context):
+  """
+  Step 1–3 combined for now:
+    1) Read start/end dates and position_id from dag_run.conf.
+    2) Load the position metadata from positions.json.
+    3) Run the AI-only pipeline for that position and write to S3.
+  """
+  start_date, end_date, position_id = _get_required_params_from_conf(**context)
+  position = _load_position_from_config(position_id)
+
+  name = position.get("name")
+  extra_terms = position.get("extra_terms")
+  if not name:
+    raise RuntimeError(f"Position '{position_id}' missing 'name' in config.")
+
+  result = run_pipeline(
+    position=name,
+    start_date=start_date,
+    end_date=end_date,
+    extra_terms=extra_terms,
+    position_id=position_id,
+    write_to_s3=True,
+    mode="ai_only",
+  )
+
+  total = int(result.get("total_positions", 0) or 0)
+  keywords = result.get("keywords") or {}
+
+  results_summary = {
+    "position_id": position_id,
+    "name": name,
+    "start_date": start_date,
+    "end_date": end_date,
+    "total_positions": total,
+    "keywords": keywords,
+    "storage": result.get("storage"),
+  }
+
+  # Push summary to XCom for Slack notifications or downstream analytics steps.
   ti = context["ti"]
   ti.xcom_push(key="results_summary", value=results_summary)
 
@@ -99,18 +125,21 @@ def slack_success_notification(**context):
   results_summary = ti.xcom_pull(
     key="results_summary", task_ids="run_latam_roles_pipeline"
   )
+  if not isinstance(results_summary, dict):
+    results_summary = {}
 
-  total = 0
-  if isinstance(results_summary, dict):
-    total = int(results_summary.get("total_positions", 0) or 0)
+  total = int(results_summary.get("total_positions", 0) or 0)
+  position_id = results_summary.get("position_id", "unknown")
+  name = results_summary.get("name", "unknown")
 
   dag_id = context["dag"].dag_id
   run_id = context["run_id"]
-  start_date, end_date = _compute_dates_from_conf_or_previous_month(**context)
+  start_date, end_date, _ = _get_required_params_from_conf(**context)
 
   message = (
     f":white_check_mark: Airflow DAG `{dag_id}` succeeded.\n"
     f"- Run ID: `{run_id}`\n"
+    f"- Position: `{position_id}` ({name})\n"
     f"- Period: {start_date} to {end_date}\n"
     f"- Total positions found: *{total}*"
   )
@@ -121,12 +150,16 @@ def slack_failure_notification(context):
   dag_id = context["dag"].dag_id
   run_id = context["run_id"]
   task_id = context.get("task_instance").task_id
-  start_date, end_date = _compute_dates_from_conf_or_previous_month(**context)
+  try:
+    start_date, end_date, position_id = _get_required_params_from_conf(**context)
+  except Exception:
+    start_date = end_date = position_id = "unknown"
 
   message = (
     f":x: Airflow DAG `{dag_id}` failed.\n"
     f"- Run ID: `{run_id}`\n"
     f"- Task: `{task_id}`\n"
+    f"- Position: `{position_id}`\n"
     f"- Period: {start_date} to {end_date}"
   )
   _post_to_slack(message)
@@ -142,8 +175,8 @@ default_args = {
 with DAG(
   dag_id="latam_roles_pipeline",
   default_args=default_args,
-  description="Collect LATAM roles data via Google + Gemini, monthly, and store in S3",
-  schedule_interval="0 3 1 * *",  # 03:00 on the 1st of each month
+  description="On-demand LATAM roles AI estimate pipeline (Gemini) writing to S3",
+  schedule_interval=None,  # run on demand via trigger only
   start_date=datetime(2025, 1, 1, tzinfo=pendulum.timezone("UTC")),
   catchup=False,
   tags=["latam", "jobs", "gemini"],
