@@ -25,6 +25,7 @@ logs/
 *.tfstate
 *.tfstate.*
 .terraform/
+infra/terraform/.terraform.lock.hcl
 
 # Local data / cache
 .pytest_cache/
