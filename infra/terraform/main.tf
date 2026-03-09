@@ -2,9 +2,8 @@ terraform {
   required_version = ">= 1.4.0"
 
   backend "s3" {
-    # You must create this bucket manually (or via separate Terraform)
-    # and optionally configure a DynamoDB table for state locking.
-    bucket = "REPLACE_ME-tf-state"
+    # Terraform state bucket (create this manually once in AWS)
+    bucket = "latam-roles-tf-state"
     region = "us-east-1"
     key    = "latam-roles/default.tfstate" # overridden by -backend-config=key=...
   }
@@ -48,6 +47,50 @@ resource "aws_s3_bucket_versioning" "results" {
 
   versioning_configuration {
     status = "Enabled"
+  }
+}
+
+#
+# Glue Data Catalog: database + external table over S3 JSON results
+#
+
+resource "aws_glue_catalog_database" "roles" {
+  name = "${local.project_name}_${var.environment}_db"
+}
+
+resource "aws_glue_catalog_table" "roles_ai_estimates" {
+  name          = "latam_roles_ai_estimates"
+  database_name = aws_glue_catalog_database.roles.name
+  table_type    = "EXTERNAL_TABLE"
+
+  parameters = {
+    classification = "json"
+    typeOfData     = "file"
+  }
+
+  storage_descriptor {
+    location      = "s3://${aws_s3_bucket.results.bucket}/roles/"
+    input_format  = "org.apache.hadoop.mapred.TextInputFormat"
+    output_format = "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat"
+
+    ser_de_info {
+      serialization_library = "org.openx.data.jsonserde.JsonSerDe"
+    }
+
+    columns {
+      name = "total_positions"
+      type = "int"
+    }
+
+    columns {
+      name = "keywords"
+      type = "map<string,int>"
+    }
+
+    columns {
+      name = "note"
+      type = "string"
+    }
   }
 }
 
@@ -132,5 +175,13 @@ output "results_bucket_name" {
 
 output "github_actions_role_arn" {
   value = aws_iam_role.github_actions.arn
+}
+
+output "glue_database_name" {
+  value = aws_glue_catalog_database.roles.name
+}
+
+output "glue_table_name" {
+  value = aws_glue_catalog_table.roles_ai_estimates.name
 }
 

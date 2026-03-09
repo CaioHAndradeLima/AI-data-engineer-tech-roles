@@ -92,10 +92,11 @@ flowchart TD
 ```mermaid
 flowchart TD
   A[Developer] --> B[make terraform-init-dev/prod]
-  B --> C[terraform init with S3 backend]
+  B --> C[bootstrap-tf-state (create tf state S3 bucket via AWS CLI)]
+  C --> D[terraform init with S3 backend]
   A --> D[make terraform-apply-dev/prod]
   D --> E[terraform apply -var environment=dev/prod -var-file=*.tfvars]
-  E --> F[AWS S3 results bucket + IAM role for GitHub]
+  E --> F[AWS S3 results bucket + Glue DB/table + IAM role for GitHub]
 ```
 
 ### 4. Usage examples
@@ -182,4 +183,106 @@ print(result["total_positions"])
   - **`search`**: Google Custom Search + Gemini extraction (requires CSE keys).
 - S3 writes are controlled via `OUTPUT_BUCKET` and the `--no-s3` flag.
 - The JSON shape in S3 is designed to be easy to query later with Athena/Glue/Redshift.
+
+### 9. AWS deployment (Terraform + S3 + Glue + Athena)
+
+#### 9.1 Prerequisites
+
+- **AWS CLI** installed and configured locally:
+
+```bash
+aws configure
+```
+
+Make sure you set:
+
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+- `AWS_DEFAULT_REGION` (e.g. `us-east-1`)
+
+#### 9.2 What Terraform creates
+
+In `infra/terraform` the Terraform stack defines:
+
+- **Terraform state bucket** (created automatically via Makefile script):
+  - `latam-roles-tf-state` in `us-east-1` (used only for Terraform state).
+- **Results S3 bucket** (per environment):
+  - `latam-roles-results-dev`
+  - `latam-roles-results-prod` (when you apply for `prod`)
+  - Used by `pipeline.py` when `OUTPUT_BUCKET` is set.
+- **Glue Data Catalog**:
+  - Database: `latam-roles_<env>_db` (e.g. `latam-roles_dev_db`).
+  - External table: `latam_roles_ai_estimates` pointing at `s3://latam-roles-results-<env>/roles/`.
+- **IAM for GitHub Actions**:
+  - GitHub OIDC provider.
+  - IAM role `latam-roles-gha-<env>` with S3 permissions for the results bucket.
+
+#### 9.3 Deploying to AWS (dev)
+
+From the project root, with AWS CLI configured:
+
+```bash
+# Initialize backend + providers, and auto-create tf state bucket if needed
+make terraform-init-dev
+
+# Create S3 results bucket, Glue DB/table, IAM role, etc.
+make terraform-apply-dev
+```
+
+After `terraform apply`, you can see outputs by running:
+
+```bash
+cd infra/terraform
+terraform output
+```
+
+You should see:
+
+- `results_bucket_name` (use this as `OUTPUT_BUCKET` in `.env.dev`).
+- `glue_database_name` / `glue_table_name` (use them in Athena).
+- `github_actions_role_arn` (set as `AWS_GITHUB_ROLE_ARN` in GitHub secrets).
+
+### 10. Database / analytics structure
+
+#### 10.1 S3 layout
+
+- Bucket per environment:
+  - `latam-roles-results-dev`
+  - `latam-roles-results-prod`
+- Object key pattern per role+run:
+  - `roles/<position_id>/<run_date>_<start_date>_to_<end_date>.json`
+
+Example:
+
+```text
+roles/data_engineer/2026-03-07_2025-01-01_to_2025-01-31.json
+```
+
+Each JSON file (one per position per run) looks like:
+
+```json
+{
+  "total_positions": 9500,
+  "keywords": {
+    "SQL": 8835,
+    "Python": 8265,
+    "AWS": 5510,
+    "Terraform": 1995
+  },
+  "note": "AI-only estimate generated directly by Gemini, not based on live job board scraping."
+}
+```
+
+#### 10.2 Glue / Athena schema
+
+Glue table `latam_roles_ai_estimates` (in DB `latam-roles_<env>_db`) has:
+
+- `total_positions` (`int`)
+- `keywords` (`map<string,int>`)
+- `note` (`string`)
+
+This allows Athena (and dbt) to:
+
+- Track **`total_positions` over time** per role and period (trend analysis).
+- Explode the `keywords` map to analyze **tool/skill demand** over years
+  (e.g. Python vs Snowflake vs Terraform popularity).
 

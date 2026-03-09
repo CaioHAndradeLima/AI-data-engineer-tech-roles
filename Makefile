@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 PYTHON ?= python3
 
-.PHONY: env-dev env-prod terraform-init-dev terraform-init-prod terraform-apply-dev terraform-apply-prod install run-dev-single run-dev-all
+.PHONY: env-dev env-prod bootstrap-tf-state terraform-init-dev terraform-init-prod terraform-apply-dev terraform-apply-prod install run-dev-single run-dev-all
 
 env-dev:
 	@chmod +x scripts/create_env.sh
@@ -11,10 +11,14 @@ env-prod:
 	@chmod +x scripts/create_env.sh
 	@./scripts/create_env.sh prod
 
-terraform-init-dev:
+bootstrap-tf-state:
+	@chmod +x scripts/create_tf_state_bucket.sh
+	@./scripts/create_tf_state_bucket.sh
+
+terraform-init-dev: bootstrap-tf-state
 	cd infra/terraform && terraform init -backend-config="key=latam-roles/dev.tfstate"
 
-terraform-init-prod:
+terraform-init-prod: bootstrap-tf-state
 	cd infra/terraform && terraform init -backend-config="key=latam-roles/prod.tfstate"
 
 terraform-apply-dev:
