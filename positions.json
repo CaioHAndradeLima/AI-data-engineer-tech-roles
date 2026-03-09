@@ -1,0 +1,20 @@
+{
+  "positions": [
+    {
+      "id": "data_engineer",
+      "name": "Data Engineer",
+      "extra_terms": "Python SQL ETL"
+    },
+    {
+      "id": "data_analyst",
+      "name": "Data Analyst",
+      "extra_terms": "BI analytics"
+    },
+    {
+      "id": "machine_learning_engineer",
+      "name": "Machine Learning Engineer",
+      "extra_terms": "ML MLOps"
+    }
+  ]
+}
+
