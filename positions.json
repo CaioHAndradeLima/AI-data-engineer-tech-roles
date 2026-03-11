@@ -1,20 +1,19 @@
 {
-  "positions": [
+  "position_groups": [
     {
       "id": "data_engineer",
-      "name": "Data Engineer",
+      "role": ["Data Engineer", "Senior Data Engineer", "Mid Data Engineer"],
       "extra_terms": "Python SQL ETL"
     },
     {
-      "id": "data_analyst",
-      "name": "Data Analyst",
-      "extra_terms": "BI analytics"
+      "id": "ai_engineer",
+      "role": ["AI Engineer", "Senior AI Engineer", "ML Engineer"],
+      "extra_terms": "LLM MLOps Python"
     },
     {
-      "id": "machine_learning_engineer",
-      "name": "Machine Learning Engineer",
-      "extra_terms": "ML MLOps"
+      "id": "data_analyst",
+      "role": ["Data Analyst", "Senior Data Analyst", "BI Analyst"],
+      "extra_terms": "BI analytics SQL"
     }
   ]
 }
-

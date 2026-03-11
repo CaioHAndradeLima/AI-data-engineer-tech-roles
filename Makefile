@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 PYTHON ?= python3
 
-.PHONY: env-dev env-prod bootstrap-tf-state terraform-init-dev terraform-init-prod terraform-apply-dev terraform-apply-prod install run-dev-single run-dev-all airflow-build airflow-init airflow-up airflow-down airflow-trigger-dev aws-create-keys-dev aws-create-keys-prod
+.PHONY: env-dev env-prod bootstrap-tf-state terraform-init-dev terraform-init-prod terraform-apply-dev terraform-apply-prod install run-dev-single run-dev-all airflow-build airflow-init airflow-up airflow-down airflow-trigger-dev airflow-trigger-all-dev aws-create-keys-dev aws-create-keys-prod
 
 env-dev:
 	@chmod +x scripts/create_env.sh
@@ -89,6 +89,19 @@ airflow-trigger-dev:
 	cd airflow && docker compose exec airflow-webserver \
 	  airflow dags trigger latam_roles_pipeline \
 	  --conf "$$(printf '{"position_name":"%s","year":"%s","month":"%s"}' "$$POSITION_NAME" "$$YEAR" "$$MONTH")"
+
+# Trigger the Airflow DAG for all role groups in positions.json for a specific month.
+# Usage:
+#   make airflow-trigger-all-dev YEAR=2026 MONTH=2
+airflow-trigger-all-dev:
+	@if [ -z "$$YEAR" ] || [ -z "$$MONTH" ]; then \
+	  echo "ERROR: Please provide YEAR and MONTH, e.g."; \
+	  echo "  make airflow-trigger-all-dev YEAR=2026 MONTH=2"; \
+	  exit 1; \
+	fi
+	cd airflow && docker compose exec airflow-webserver \
+	  airflow dags trigger latam_roles_pipeline \
+	  --conf "$$(printf '{"year":"%s","month":"%s"}' "$$YEAR" "$$MONTH")"
 
 # Create IAM access keys via AWS CLI and write them into .env.dev
 # Usage:

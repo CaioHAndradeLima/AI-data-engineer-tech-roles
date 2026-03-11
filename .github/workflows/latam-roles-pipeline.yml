@@ -1,4 +1,4 @@
-name: LATAM Roles Pipeline
+name: LATAM Roles Pipeline (Ephemeral Infra)
 
 on:
   workflow_dispatch:
@@ -10,29 +10,37 @@ on:
         options:
           - dev
           - prod
-      start_date:
-        description: "Start date (YYYY-MM-DD). If empty, previous full month is used."
+      year:
+        description: "Year (YYYY). If empty, previous month is used."
         required: false
         type: string
-      end_date:
-        description: "End date (YYYY-MM-DD). If empty, previous full month is used."
+      month:
+        description: "Month (1-12). If empty, previous month is used."
         required: false
         type: string
+      position_name:
+        description: "Optional single position name. If empty, run all groups from positions.json."
+        required: false
+        type: string
+      destroy_after_run:
+        description: "Destroy Terraform resources after run"
+        required: true
+        default: true
+        type: boolean
   schedule:
-    - cron: "0 3 1 * *" # 03:00 on the 1st of each month
+    - cron: "0 3 1 * *" # day 1 of each month at 03:00 UTC
 
 jobs:
-  run-pipeline:
+  terraform-apply:
     runs-on: ubuntu-latest
-
     permissions:
       id-token: write
       contents: read
-
     env:
       AWS_REGION: us-east-1
-      POSITIONS_CONFIG: positions.json
-
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
+    outputs:
+      results_bucket_name: ${{ steps.tf-outputs.outputs.results_bucket_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,60 +51,140 @@ jobs:
           role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
 
-      - name: Install dependencies
+      - name: Terraform init
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          cd infra/terraform
+          terraform init -backend-config="key=latam-roles/${ENVIRONMENT}.tfstate"
 
-      - name: Load environment variables
+      - name: Terraform apply
         run: |
-          ENVIRONMENT="${{ github.event.inputs.environment || 'prod' }}"
-          ENV_FILE=".env.${ENVIRONMENT}"
-          if [ ! -f "$ENV_FILE" ]; then
-            echo "Env file $ENV_FILE not found. Create it locally with 'make env-${ENVIRONMENT}' and commit or add to secrets."
-            exit 1
-          fi
-          export $(grep -v '^#' "$ENV_FILE" | xargs)
-          echo "GEMINI_API_KEY=${GEMINI_API_KEY}" >> $GITHUB_ENV
-          echo "GOOGLE_CSE_API_KEY=${GOOGLE_CSE_API_KEY}" >> $GITHUB_ENV
-          echo "GOOGLE_CSE_ID=${GOOGLE_CSE_ID}" >> $GITHUB_ENV
-          echo "OUTPUT_BUCKET=${OUTPUT_BUCKET}" >> $GITHUB_ENV
+          cd infra/terraform
+          terraform apply -auto-approve -var="environment=${ENVIRONMENT}" -var-file="${ENVIRONMENT}.tfvars"
 
-      - name: Compute date range
-        id: dates
+      - name: Terraform outputs
+        id: tf-outputs
         run: |
-          INPUT_START="${{ github.event.inputs.start_date }}"
-          INPUT_END="${{ github.event.inputs.end_date }}"
+          cd infra/terraform
+          BUCKET=$(terraform output -raw results_bucket_name)
+          echo "results_bucket_name=$BUCKET" >> "$GITHUB_OUTPUT"
 
-          if [ -n "$INPUT_START" ] && [ -n "$INPUT_END" ]; then
-            echo "start_date=$INPUT_START" >> $GITHUB_OUTPUT
-            echo "end_date=$INPUT_END" >> $GITHUB_OUTPUT
+  airflow-run:
+    runs-on: ubuntu-latest
+    needs: terraform-apply
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: us-east-1
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GOOGLE_CSE_API_KEY: ${{ secrets.GOOGLE_CSE_API_KEY }}
+      GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
+      OUTPUT_BUCKET: ${{ needs.terraform-apply.outputs.results_bucket_name }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      SLACK_CHANNEL: ${{ vars.SLACK_CHANNEL }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute year/month
+        id: period
+        run: |
+          INPUT_YEAR="${{ github.event.inputs.year }}"
+          INPUT_MONTH="${{ github.event.inputs.month }}"
+          if [ -n "$INPUT_YEAR" ] && [ -n "$INPUT_MONTH" ]; then
+            YEAR="$INPUT_YEAR"
+            MONTH="$INPUT_MONTH"
           else
-            # Previous full calendar month in UTC
-            NOW=$(date -u +%Y-%m-01)
-            LAST_MONTH_END=$(date -u -d "$NOW - 1 day" +%Y-%m-%d)
-            LAST_MONTH_START=$(date -u -d "$LAST_MONTH_END" +%Y-%m-01)
-            echo "start_date=$LAST_MONTH_START" >> $GITHUB_OUTPUT
-            echo "end_date=$LAST_MONTH_END" >> $GITHUB_OUTPUT
+            PREV_MONTH_DATE=$(date -u -d "$(date -u +%Y-%m-01) -1 day" +%Y-%m-%d)
+            YEAR=$(date -u -d "$PREV_MONTH_DATE" +%Y)
+            MONTH=$(date -u -d "$PREV_MONTH_DATE" +%-m)
           fi
+          echo "year=$YEAR" >> "$GITHUB_OUTPUT"
+          echo "month=$MONTH" >> "$GITHUB_OUTPUT"
 
-      - name: Run pipeline for all positions
-        env:
-          GEMINI_API_KEY: ${{ env.GEMINI_API_KEY }}
-          GOOGLE_CSE_API_KEY: ${{ env.GOOGLE_CSE_API_KEY }}
-          GOOGLE_CSE_ID: ${{ env.GOOGLE_CSE_ID }}
-          OUTPUT_BUCKET: ${{ env.OUTPUT_BUCKET }}
+      - name: Write .env.dev for docker-compose
         run: |
-          START_DATE="${{ steps.dates.outputs.start_date }}"
-          END_DATE="${{ steps.dates.outputs.end_date }}"
-          echo "Running pipeline from $START_DATE to $END_DATE"
-          python pipeline.py \
-            --start-date "$START_DATE" \
-            --end-date "$END_DATE" \
-            --positions-config "${{ env.POSITIONS_CONFIG }}"
+          cat > .env.dev <<EOF
+          GEMINI_API_KEY=${GEMINI_API_KEY}
+          GOOGLE_CSE_API_KEY=${GOOGLE_CSE_API_KEY}
+          GOOGLE_CSE_ID=${GOOGLE_CSE_ID}
+          AWS_REGION=${AWS_REGION}
+          OUTPUT_BUCKET=${OUTPUT_BUCKET}
+          SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+          SLACK_CHANNEL=${SLACK_CHANNEL}
+          AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+          AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+          AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
+          EOF
 
+      - name: Build and start Airflow
+        run: |
+          make airflow-build
+          make airflow-init
+          make airflow-up
+
+      - name: Trigger DAG (single position)
+        if: ${{ github.event.inputs.position_name != '' }}
+        run: |
+          make airflow-trigger-dev \
+            POSITION_NAME="${{ github.event.inputs.position_name }}" \
+            YEAR="${{ steps.period.outputs.year }}" \
+            MONTH="${{ steps.period.outputs.month }}"
+
+      - name: Trigger DAG (all groups)
+        if: ${{ github.event.inputs.position_name == '' }}
+        run: |
+          make airflow-trigger-all-dev \
+            YEAR="${{ steps.period.outputs.year }}" \
+            MONTH="${{ steps.period.outputs.month }}"
+
+      - name: Wait and print status
+        run: |
+          cd airflow
+          sleep 20
+          docker compose exec airflow-webserver airflow dags list-runs -d latam_roles_pipeline
+
+      - name: Stop local Airflow stack
+        if: always()
+        run: |
+          make airflow-down
+
+  terraform-destroy:
+    runs-on: ubuntu-latest
+    needs: [terraform-apply, airflow-run]
+    if: ${{ always() && (github.event_name == 'schedule' || github.event.inputs.destroy_after_run == 'true') }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: us-east-1
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (assume role via OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        run: |
+          cd infra/terraform
+          terraform init -backend-config="key=latam-roles/${ENVIRONMENT}.tfstate"
+
+      - name: Terraform destroy
+        run: |
+          cd infra/terraform
+          terraform destroy -auto-approve -var="environment=${ENVIRONMENT}" -var-file="${ENVIRONMENT}.tfvars"

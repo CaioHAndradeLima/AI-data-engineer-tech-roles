@@ -17,6 +17,63 @@ GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
 GENAI_CLIENT: Optional[genai.Client] = None
 
 
+def normalize_position_id(position_name: str) -> str:
+    return position_name.strip().lower().replace(" ", "_")
+
+
+def load_position_groups(positions_config_path: str) -> List[Dict[str, Any]]:
+    """
+    Load position groups from config file.
+
+    Supported formats:
+    1) New:
+       {"position_groups":[{"id":"data_engineer","role":["Data Engineer","Senior Data Engineer"]}]}
+    2) Legacy:
+       {"positions":[{"id":"data_engineer","name":"Data Engineer","extra_terms":"..."}]}
+    """
+    with open(positions_config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    groups = config.get("position_groups")
+    if isinstance(groups, list) and groups:
+        normalized: List[Dict[str, Any]] = []
+        for item in groups:
+            roles = item.get("role") or []
+            if isinstance(roles, str):
+                roles = [roles]
+            roles = [r.strip() for r in roles if isinstance(r, str) and r.strip()]
+            if not roles:
+                continue
+
+            group_id = item.get("id") or normalize_position_id(roles[0])
+            normalized.append(
+                {
+                    "id": group_id,
+                    "name": roles[0],
+                    "role_aliases": roles,
+                    "extra_terms": item.get("extra_terms"),
+                }
+            )
+        return normalized
+
+    legacy_positions = config.get("positions", [])
+    normalized_legacy: List[Dict[str, Any]] = []
+    for item in legacy_positions:
+        position_id = item.get("id")
+        name = item.get("name")
+        if not position_id or not name:
+            continue
+        normalized_legacy.append(
+            {
+                "id": position_id,
+                "name": name,
+                "role_aliases": [name],
+                "extra_terms": item.get("extra_terms"),
+            }
+        )
+    return normalized_legacy
+
+
 def build_result_s3_key(position_id: str, start_date: str, end_date: str) -> str:
     """
     Build a deterministic S3 key for a monthly run.
@@ -217,6 +274,7 @@ def ask_gemini_to_estimate_positions(
     position: str,
     start_date: str,
     end_date: str,
+    role_aliases: Optional[List[str]] = None,
     model_name: str = "gemini-3-flash-preview",
 ) -> Dict[str, Any]:
     """
@@ -234,8 +292,12 @@ def ask_gemini_to_estimate_positions(
         "Your answer is an estimate, not an exact measurement."
     )
 
+    aliases = role_aliases or [position]
+    aliases_text = ", ".join(aliases)
+
     user_instruction = f"""
 Role: {position}
+Role aliases (same family, include all in estimate): {aliases_text}
 Region: LATAM (Latin America)
 Start date: {start_date}
 End date: {end_date}
@@ -243,11 +305,12 @@ End date: {end_date}
 Task:
 1. Provide your best-guess estimate of how many open positions existed for
    this role in this region and period. The number must be a single integer.
-2. Based on your understanding of typical job descriptions for this role in
+2. Consider all role aliases above as equivalent targets of the same role family.
+3. Based on your understanding of typical job descriptions for this role in
    LATAM, build an approximate frequency table of the most relevant tools,
    technologies, or skills (e.g. Python, SQL, Snowflake, Terraform, dbt,
    Airflow, etc.) that would appear in those postings.
-3. Return ONLY a JSON object with this structure (no extra text):
+4. Return ONLY a JSON object with this structure (no extra text):
 {{
   "total_positions": <int>,  // your estimated count of positions
   "keywords": {{
@@ -333,6 +396,7 @@ def run_pipeline(
     end_date: str,
     max_results: int = 20,
     extra_terms: Optional[str] = None,
+    role_aliases: Optional[List[str]] = None,
     position_id: Optional[str] = None,
     write_to_s3: bool = True,
     mode: str = "ai_only",
@@ -370,6 +434,7 @@ def run_pipeline(
             position=position,
             start_date=start_date,
             end_date=end_date,
+            role_aliases=role_aliases,
         )
 
     if write_to_s3 and position_id:
@@ -461,19 +526,16 @@ def main() -> None:
         print("Raw result:")
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
-        # Multi-position mode: read from positions.json (or custom path).
-        with open(args.positions_config, "r", encoding="utf-8") as f:
-            config = json.load(f)
-
-        positions = config.get("positions", [])
-        if not positions:
+        # Multi-position/group mode: read from positions config.
+        groups = load_position_groups(args.positions_config)
+        if not groups:
             raise RuntimeError(
                 f"No positions found in config file {args.positions_config}"
             )
 
         summary: Dict[str, Any] = {"positions": [], "total_positions": 0}
 
-        for item in positions:
+        for item in groups:
             position_id = item.get("id")
             name = item.get("name")
             extra_terms = item.get("extra_terms")
@@ -487,6 +549,7 @@ def main() -> None:
                 end_date=args.end_date,
                 max_results=args.max_results,
                 extra_terms=extra_terms or args.extra_terms,
+                role_aliases=item.get("role_aliases"),
                 position_id=position_id,
                 write_to_s3=write_to_s3,
                 mode=args.mode,
