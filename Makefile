@@ -79,16 +79,16 @@ airflow-down:
 
 # Trigger the Airflow DAG in the local docker-compose environment.
 # Usage:
-#   make airflow-trigger-dev POSITION_ID=data_engineer START_DATE=2025-01-01 END_DATE=2025-01-31
+#   make airflow-trigger-dev POSITION_NAME="Data Engineer" YEAR=2026 MONTH=2
 airflow-trigger-dev:
-	@if [ -z "$$POSITION_ID" ] || [ -z "$$START_DATE" ] || [ -z "$$END_DATE" ]; then \
-	  echo "ERROR: Please provide POSITION_ID, START_DATE, and END_DATE, e.g."; \
-	  echo "  make airflow-trigger-dev POSITION_ID=data_engineer START_DATE=2025-01-01 END_DATE=2025-01-31"; \
+	@if [ -z "$$POSITION_NAME" ] || [ -z "$$YEAR" ] || [ -z "$$MONTH" ]; then \
+	  echo "ERROR: Please provide POSITION_NAME, YEAR, and MONTH, e.g."; \
+	  echo "  make airflow-trigger-dev POSITION_NAME=\"Data Engineer\" YEAR=2026 MONTH=2"; \
 	  exit 1; \
 	fi
 	cd airflow && docker compose exec airflow-webserver \
 	  airflow dags trigger latam_roles_pipeline \
-	  --conf "$$(printf '{"position_id":"%s","start_date":"%s","end_date":"%s"}' "$$POSITION_ID" "$$START_DATE" "$$END_DATE")"
+	  --conf "$$(printf '{"position_name":"%s","year":"%s","month":"%s"}' "$$POSITION_NAME" "$$YEAR" "$$MONTH")"
 
 # Create IAM access keys via AWS CLI and write them into .env.dev
 # Usage:
@@ -114,4 +114,3 @@ aws-create-keys-prod:
 	@chmod +x scripts/create_aws_access_keys.sh
 	@CREATE_USER="$${CREATE_USER:-0}" POLICY_ARN="$${POLICY_ARN:-}" \
 	  ./scripts/create_aws_access_keys.sh "$$IAM_USER" ".env.prod"
-

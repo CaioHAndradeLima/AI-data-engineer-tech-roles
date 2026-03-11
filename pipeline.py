@@ -17,6 +17,42 @@ GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
 GENAI_CLIENT: Optional[genai.Client] = None
 
 
+def build_result_s3_key(position_id: str, start_date: str, end_date: str) -> str:
+    """
+    Build a deterministic S3 key for a monthly run.
+    Layout: roles/<position>/<year>/<start_date>/<end_date>/result.json
+    """
+    year = start_date[:4]
+    return f"roles/{position_id}/{year}/{start_date}/{end_date}/result.json"
+
+
+def result_exists_in_s3(
+    position_id: str,
+    start_date: str,
+    end_date: str,
+    bucket: Optional[str] = None,
+) -> bool:
+    """
+    Check whether the monthly result object already exists in S3.
+    """
+    target_bucket = bucket or os.getenv("OUTPUT_BUCKET")
+    if not target_bucket:
+        raise RuntimeError("OUTPUT_BUCKET is not configured.")
+
+    session = boto3.Session()
+    s3 = session.client("s3")
+    key = build_result_s3_key(position_id, start_date, end_date)
+
+    try:
+        s3.head_object(Bucket=target_bucket, Key=key)
+        return True
+    except ClientError as exc:
+        error_code = (exc.response or {}).get("Error", {}).get("Code")
+        if error_code in ("404", "NoSuchKey", "NotFound"):
+            return False
+        raise
+
+
 def load_config() -> None:
     """
     Load environment variables from .env if present and configure Gemini.
@@ -272,8 +308,7 @@ def write_result_to_s3(
     session = boto3.Session()
     s3 = session.client("s3")
 
-    today = date.today().isoformat()
-    key = f"roles/{position_id}/{today}_{start_date}_to_{end_date}.json"
+    key = build_result_s3_key(position_id, start_date, end_date)
 
     try:
         s3.put_object(

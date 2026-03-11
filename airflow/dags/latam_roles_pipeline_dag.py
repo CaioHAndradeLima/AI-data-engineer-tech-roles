@@ -1,33 +1,35 @@
 import json
 import os
+from calendar import monthrange
+from datetime import date
 from datetime import datetime
 
 import pendulum
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
-from pipeline import run_pipeline, write_result_to_s3
+from pipeline import result_exists_in_s3, run_pipeline, write_result_to_s3
 
 
 def _get_required_params_from_conf(**context):
   """
   Read required parameters from dag_run.conf.
   Expected keys (all required):
-    - start_date (YYYY-MM-DD)
-    - end_date (YYYY-MM-DD)
-    - position_id (must exist in positions.json)
+    - position_name (e.g. "Data Engineer")
+    - year (YYYY)
+    - month (1..12)
   """
   dag_run = context.get("dag_run")
   conf = getattr(dag_run, "conf", {}) or {}
 
-  start_date = conf.get("start_date")
-  end_date = conf.get("end_date")
-  position_id = conf.get("position_id")
+  position_name = conf.get("position_name")
+  year = conf.get("year")
+  month = conf.get("month")
 
   missing = [k for k, v in [
-    ("start_date", start_date),
-    ("end_date", end_date),
-    ("position_id", position_id),
+    ("position_name", position_name),
+    ("year", year),
+    ("month", month),
   ] if not v]
 
   if missing:
@@ -36,12 +38,35 @@ def _get_required_params_from_conf(**context):
       "Provide them when triggering the DAG."
     )
 
-  return start_date, end_date, position_id
+  return position_name, year, month
 
 
-def _load_position_from_config(position_id: str):
+def _normalize_position_id(position_name: str) -> str:
+  return position_name.strip().lower().replace(" ", "_")
+
+
+def _build_month_date_range(year_raw, month_raw):
+  try:
+    year = int(year_raw)
+    month = int(month_raw)
+  except Exception as exc:  # noqa: BLE001
+    raise RuntimeError("Invalid year/month. Use numeric values like year=2026 month=2.") from exc
+
+  if month < 1 or month > 12:
+    raise RuntimeError("Invalid month. Expected 1..12.")
+  if year < 2000 or year > 2100:
+    raise RuntimeError("Invalid year. Expected range 2000..2100.")
+
+  start = date(year, month, 1)
+  last_day = monthrange(year, month)[1]
+  end = date(year, month, last_day)
+  return start.isoformat(), end.isoformat(), year, month
+
+
+def _load_position_from_config(position_name: str):
   """
-  Load a single position definition from positions.json by id.
+  Load position metadata from positions.json by name (case-insensitive).
+  If no exact match is found, fallback to provided name without extra terms.
   """
   # Prefer explicit env var, then container project mount path, then local path.
   positions_config_path = os.environ.get(
@@ -54,27 +79,56 @@ def _load_position_from_config(position_id: str):
   if not positions:
     raise RuntimeError(f"No positions found in {positions_config_path}")
 
+  normalized = position_name.strip().lower()
   for item in positions:
-    if item.get("id") == position_id:
+    if (item.get("name") or "").strip().lower() == normalized:
       return item
 
-  raise RuntimeError(
-    f"Position id '{position_id}' not found in {positions_config_path}"
-  )
+  return {
+    "id": _normalize_position_id(position_name),
+    "name": position_name,
+    "extra_terms": None,
+  }
 
 
 def request_gemini_estimate(**context):
   """
   Step 1:
-    Request an AI estimate from Gemini (no S3 write in this step).
+    Validate the request and call Gemini (no S3 write in this step).
   """
-  start_date, end_date, position_id = _get_required_params_from_conf(**context)
-  position = _load_position_from_config(position_id)
+  position_name, year_raw, month_raw = _get_required_params_from_conf(**context)
+  start_date, end_date, year, month = _build_month_date_range(year_raw, month_raw)
+
+  today = datetime.now(tz=pendulum.timezone("UTC")).date()
+  if year == today.year and month == today.month:
+    raise RuntimeError(
+      "Current month runs are blocked. Run only after month closes (typically on day 1 for previous month)."
+    )
+
+  start_obj = date.fromisoformat(start_date)
+  if start_obj > today:
+    raise RuntimeError(
+      f"Future period is not allowed: start_date={start_date} is after today={today.isoformat()}."
+    )
+
+  position = _load_position_from_config(position_name)
+  position_id = position.get("id") or _normalize_position_id(position_name)
 
   name = position.get("name")
   extra_terms = position.get("extra_terms")
   if not name:
     raise RuntimeError(f"Position '{position_id}' missing 'name' in config.")
+
+  already_exists = result_exists_in_s3(
+    position_id=position_id,
+    start_date=start_date,
+    end_date=end_date,
+  )
+  if already_exists:
+    raise RuntimeError(
+      "Data already exists in S3 for this period. "
+      f"position={position_id}, start_date={start_date}, end_date={end_date}"
+    )
 
   result = run_pipeline(
     position=name,
@@ -91,6 +145,8 @@ def request_gemini_estimate(**context):
     "name": name,
     "start_date": start_date,
     "end_date": end_date,
+    "year": year,
+    "month": month,
     "result": result,
   }
 
@@ -149,6 +205,8 @@ def slack_notification_stub(**context):
   name = payload.get("name", "unknown")
   start_date = payload.get("start_date", "unknown")
   end_date = payload.get("end_date", "unknown")
+  year = payload.get("year", "unknown")
+  month = payload.get("month", "unknown")
   storage = result.get("storage") or {}
 
   dag_id = context["dag"].dag_id
@@ -158,6 +216,7 @@ def slack_notification_stub(**context):
     f":white_check_mark: Airflow DAG `{dag_id}` succeeded.\n"
     f"- Run ID: `{run_id}`\n"
     f"- Position: `{position_id}` ({name})\n"
+    f"- Requested month: {year}-{str(month).zfill(2)}\n"
     f"- Period: {start_date} to {end_date}\n"
     f"- Total positions found: *{total}*\n"
     f"- S3: s3://{storage.get('s3_bucket', 'unknown')}/{storage.get('s3_key', 'unknown')}"
@@ -169,16 +228,16 @@ def slack_failure_notification(context):
   run_id = context["run_id"]
   task_id = context.get("task_instance").task_id
   try:
-    start_date, end_date, position_id = _get_required_params_from_conf(**context)
+    position_name, year, month = _get_required_params_from_conf(**context)
   except Exception:
-    start_date = end_date = position_id = "unknown"
+    position_name = year = month = "unknown"
 
   print(
     f":x: Airflow DAG `{dag_id}` failed.\n"
     f"- Run ID: `{run_id}`\n"
     f"- Task: `{task_id}`\n"
-    f"- Position: `{position_id}`\n"
-    f"- Period: {start_date} to {end_date}"
+    f"- Position: `{position_name}`\n"
+    f"- Requested month: {year}-{month}"
   )
 
 
