@@ -3,11 +3,10 @@ import os
 from datetime import datetime
 
 import pendulum
-import requests
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
-from pipeline import run_pipeline
+from pipeline import run_pipeline, write_result_to_s3
 
 
 def _get_required_params_from_conf(**context):
@@ -64,12 +63,10 @@ def _load_position_from_config(position_id: str):
   )
 
 
-def run_latam_roles_pipeline(**context):
+def request_gemini_estimate(**context):
   """
-  Step 1–3 combined for now:
-    1) Read start/end dates and position_id from dag_run.conf.
-    2) Load the position metadata from positions.json.
-    3) Run the AI-only pipeline for that position and write to S3.
+  Step 1:
+    Request an AI estimate from Gemini (no S3 write in this step).
   """
   start_date, end_date, position_id = _get_required_params_from_conf(**context)
   position = _load_position_from_config(position_id)
@@ -85,68 +82,86 @@ def run_latam_roles_pipeline(**context):
     end_date=end_date,
     extra_terms=extra_terms,
     position_id=position_id,
-    write_to_s3=True,
+    write_to_s3=False,
     mode="ai_only",
   )
 
-  total = int(result.get("total_positions", 0) or 0)
-  keywords = result.get("keywords") or {}
-
-  results_summary = {
+  payload = {
     "position_id": position_id,
     "name": name,
     "start_date": start_date,
     "end_date": end_date,
-    "total_positions": total,
-    "keywords": keywords,
-    "storage": result.get("storage"),
+    "result": result,
   }
 
-  # Push summary to XCom for Slack notifications or downstream analytics steps.
+  return payload
+
+
+def write_info_to_s3(**context):
+  """
+  Step 2:
+    Persist estimate JSON to S3. This step is strict and fails DAG on any S3 error.
+  """
   ti = context["ti"]
-  ti.xcom_push(key="results_summary", value=results_summary)
+  payload = ti.xcom_pull(
+    task_ids="request_gemini_estimate", key="return_value"
+  ) or {}
 
+  result = payload.get("result")
+  position_id = payload.get("position_id")
+  start_date = payload.get("start_date")
+  end_date = payload.get("end_date")
 
-def _post_to_slack(message: str) -> None:
-  webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
-  if not webhook_url:
-    # Slack not configured; just log.
-    print("SLACK_WEBHOOK_URL not set; skipping Slack notification.")
-    print(message)
-    return
+  if not isinstance(result, dict):
+    raise RuntimeError("Missing Gemini result from previous task.")
+  if not position_id or not start_date or not end_date:
+    raise RuntimeError("Missing metadata required for S3 write.")
 
-  payload = {"text": message}
-  resp = requests.post(webhook_url, json=payload, timeout=10)
-  try:
-    resp.raise_for_status()
-  except Exception as exc:  # noqa: BLE001
-    print(f"Failed to send Slack notification: {exc} - response={resp.text}")
-
-
-def slack_success_notification(**context):
-  ti = context["ti"]
-  results_summary = ti.xcom_pull(
-    key="results_summary", task_ids="run_latam_roles_pipeline"
+  s3_key = write_result_to_s3(
+    result=result,
+    position_id=position_id,
+    start_date=start_date,
+    end_date=end_date,
+    fail_on_error=True,
   )
-  if not isinstance(results_summary, dict):
-    results_summary = {}
+  if not s3_key:
+    raise RuntimeError("S3 write returned no object key.")
 
-  total = int(results_summary.get("total_positions", 0) or 0)
-  position_id = results_summary.get("position_id", "unknown")
-  name = results_summary.get("name", "unknown")
+  result.setdefault("storage", {})
+  result["storage"]["s3_bucket"] = os.environ.get("OUTPUT_BUCKET")
+  result["storage"]["s3_key"] = s3_key
+  payload["result"] = result
+
+  return payload
+
+
+def slack_notification_stub(**context):
+  """
+  Step 3:
+    Placeholder for Slack notification. For now, just logs the final summary.
+  """
+  ti = context["ti"]
+  payload = ti.xcom_pull(task_ids="write_info_to_s3", key="return_value") or {}
+  result = payload.get("result") or {}
+
+  total = int(result.get("total_positions", 0) or 0)
+  position_id = payload.get("position_id", "unknown")
+  name = payload.get("name", "unknown")
+  start_date = payload.get("start_date", "unknown")
+  end_date = payload.get("end_date", "unknown")
+  storage = result.get("storage") or {}
 
   dag_id = context["dag"].dag_id
   run_id = context["run_id"]
-  start_date, end_date, _ = _get_required_params_from_conf(**context)
 
-  message = (
+  print(
     f":white_check_mark: Airflow DAG `{dag_id}` succeeded.\n"
     f"- Run ID: `{run_id}`\n"
     f"- Position: `{position_id}` ({name})\n"
     f"- Period: {start_date} to {end_date}\n"
-    f"- Total positions found: *{total}*"
+    f"- Total positions found: *{total}*\n"
+    f"- S3: s3://{storage.get('s3_bucket', 'unknown')}/{storage.get('s3_key', 'unknown')}"
   )
-  _post_to_slack(message)
 
 
 def slack_failure_notification(context):
@@ -158,14 +173,13 @@ def slack_failure_notification(context):
   except Exception:
     start_date = end_date = position_id = "unknown"
 
-  message = (
+  print(
     f":x: Airflow DAG `{dag_id}` failed.\n"
     f"- Run ID: `{run_id}`\n"
     f"- Task: `{task_id}`\n"
     f"- Position: `{position_id}`\n"
     f"- Period: {start_date} to {end_date}"
   )
-  _post_to_slack(message)
 
 
 default_args = {
@@ -184,16 +198,22 @@ with DAG(
   catchup=False,
   tags=["latam", "jobs", "gemini"],
 ) as dag:
-  run_task = PythonOperator(
-    task_id="run_latam_roles_pipeline",
-    python_callable=run_latam_roles_pipeline,
+  request_gemini = PythonOperator(
+    task_id="request_gemini_estimate",
+    python_callable=request_gemini_estimate,
     provide_context=True,
   )
 
-  slack_success = PythonOperator(
-    task_id="slack_success_notification",
-    python_callable=slack_success_notification,
+  write_s3 = PythonOperator(
+    task_id="write_info_to_s3",
+    python_callable=write_info_to_s3,
     provide_context=True,
   )
 
-  run_task >> slack_success
+  slack_stub = PythonOperator(
+    task_id="slack_notification_stub",
+    python_callable=slack_notification_stub,
+    provide_context=True,
+  )
+
+  request_gemini >> write_s3 >> slack_stub

@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 PYTHON ?= python3
 
-.PHONY: env-dev env-prod bootstrap-tf-state terraform-init-dev terraform-init-prod terraform-apply-dev terraform-apply-prod install run-dev-single run-dev-all airflow-build airflow-init airflow-up airflow-down airflow-trigger-dev
+.PHONY: env-dev env-prod bootstrap-tf-state terraform-init-dev terraform-init-prod terraform-apply-dev terraform-apply-prod install run-dev-single run-dev-all airflow-build airflow-init airflow-up airflow-down airflow-trigger-dev aws-create-keys-dev aws-create-keys-prod
 
 env-dev:
 	@chmod +x scripts/create_env.sh
@@ -90,4 +90,28 @@ airflow-trigger-dev:
 	  airflow dags trigger latam_roles_pipeline \
 	  --conf "$$(printf '{"position_id":"%s","start_date":"%s","end_date":"%s"}' "$$POSITION_ID" "$$START_DATE" "$$END_DATE")"
 
+# Create IAM access keys via AWS CLI and write them into .env.dev
+# Usage:
+#   make aws-create-keys-dev IAM_USER=airflow-local-dev
+#   make aws-create-keys-dev IAM_USER=airflow-local-dev CREATE_USER=1 POLICY_ARN=arn:aws:iam::aws:policy/AmazonS3FullAccess
+aws-create-keys-dev:
+	@if [ -z "$$IAM_USER" ]; then \
+	  echo "ERROR: Please provide IAM_USER, e.g."; \
+	  echo "  make aws-create-keys-dev IAM_USER=airflow-local-dev"; \
+	  exit 1; \
+	fi
+	@chmod +x scripts/create_aws_access_keys.sh
+	@CREATE_USER="$${CREATE_USER:-0}" POLICY_ARN="$${POLICY_ARN:-}" \
+	  ./scripts/create_aws_access_keys.sh "$$IAM_USER" ".env.dev"
+
+# Same helper for .env.prod
+aws-create-keys-prod:
+	@if [ -z "$$IAM_USER" ]; then \
+	  echo "ERROR: Please provide IAM_USER, e.g."; \
+	  echo "  make aws-create-keys-prod IAM_USER=airflow-prod-user"; \
+	  exit 1; \
+	fi
+	@chmod +x scripts/create_aws_access_keys.sh
+	@CREATE_USER="$${CREATE_USER:-0}" POLICY_ARN="$${POLICY_ARN:-}" \
+	  ./scripts/create_aws_access_keys.sh "$$IAM_USER" ".env.prod"
 

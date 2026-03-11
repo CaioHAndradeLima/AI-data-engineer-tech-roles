@@ -257,6 +257,7 @@ def write_result_to_s3(
     position_id: str,
     start_date: str,
     end_date: str,
+    fail_on_error: bool = False,
 ) -> Optional[str]:
     """
     Optionally write the result JSON to S3 if OUTPUT_BUCKET is configured.
@@ -264,6 +265,8 @@ def write_result_to_s3(
     """
     bucket = os.getenv("OUTPUT_BUCKET")
     if not bucket:
+        if fail_on_error:
+            raise RuntimeError("OUTPUT_BUCKET is not configured.")
         return None
 
     session = boto3.Session()
@@ -280,7 +283,9 @@ def write_result_to_s3(
             ContentType="application/json",
         )
     except (BotoCoreError, ClientError) as exc:
-        # Do not fail the pipeline if S3 write fails; just log.
+        if fail_on_error:
+            raise RuntimeError(f"Failed to write result to S3: {exc}") from exc
+        # Non-strict mode: keep backward-compatible behavior.
         print(f"Failed to write result to S3: {exc}")
         return None
 
@@ -469,4 +474,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

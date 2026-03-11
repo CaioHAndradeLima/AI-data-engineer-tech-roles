@@ -11,6 +11,7 @@ env/
 # Environment / secrets
 .env
 .env.*
+.env.dev
 
 # OS / editor noise
 .DS_Store
