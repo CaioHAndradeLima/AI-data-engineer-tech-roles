@@ -25,7 +25,7 @@ on:
       apply_infra:
         description: "Apply Terraform for persistent AWS infra before running"
         required: true
-        default: true
+        default: false
         type: boolean
   schedule:
     - cron: "0 3 1 * *"
@@ -144,12 +144,21 @@ jobs:
           for i in $(seq 1 60); do
             if curl -fsS http://localhost:8080/health >/tmp/airflow-health.json; then
               cat /tmp/airflow-health.json
-              exit 0
+              cd airflow
+              if docker compose exec -T airflow-webserver airflow dags list | grep -q "latam_roles_pipeline"; then
+                exit 0
+              fi
+              cd ..
             fi
             sleep 5
           done
-          echo "Airflow webserver did not become ready in time."
+          echo "Airflow services did not become ready in time."
           exit 1
+
+      - name: Unpause DAG
+        run: |
+          cd airflow
+          docker compose exec -T airflow-webserver airflow dags unpause latam_roles_pipeline
 
       - name: Trigger DAG
         run: |
