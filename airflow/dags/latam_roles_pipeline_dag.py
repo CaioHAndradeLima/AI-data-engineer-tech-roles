@@ -118,7 +118,7 @@ def _run_gemini_with_retries(
 @dag(
     dag_id="latam_roles_pipeline",
     description="Simple master + mapped-role pipeline for LATAM role estimates",
-    schedule="0 3 1 * *",  # day 1 of each month at 03:00 UTC
+    schedule=None,
     start_date=datetime(2025, 1, 1, tzinfo=pendulum.timezone("UTC")),
     catchup=False,
     tags=["latam", "jobs", "gemini", "mapped"],
