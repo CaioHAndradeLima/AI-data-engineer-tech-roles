@@ -134,7 +134,9 @@ jobs:
         run: make airflow-build
 
       - name: Prepare Airflow log directory
-        run: mkdir -p airflow/logs
+        run: |
+          mkdir -p airflow/logs
+          chmod -R 0777 airflow/logs
 
       - name: Initialize Airflow
         run: make airflow-init
