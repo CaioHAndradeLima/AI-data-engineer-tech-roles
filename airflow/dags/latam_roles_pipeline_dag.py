@@ -179,7 +179,7 @@ def latam_roles_pipeline():
     ) -> Dict[str, Any]:
         """
         One mapped task per role item.
-        Returns success/failure status (never raises), so all mapped items run.
+        Fails this mapped task on Gemini or S3 errors, with contextual logs.
         """
         position_id = role_item.get("id") or normalize_position_id(
             role_item.get("name", "unknown")
@@ -191,31 +191,22 @@ def latam_roles_pipeline():
         end_date = run_meta["end_date"]
 
         if not name:
-            return {
-                "status": "failed",
-                "stage": "validation",
-                "position_id": position_id,
-                "name": name,
-                "error": "Missing role name in config.",
-            }
+            raise RuntimeError(
+                f"[validation] Missing role name in config. "
+                f"position_id={position_id}, start_date={start_date}, end_date={end_date}"
+            )
+
+        if result_exists_in_s3(
+            position_id=position_id,
+            start_date=start_date,
+            end_date=end_date,
+        ):
+            raise RuntimeError(
+                f"[precheck] Data already exists in S3 for this period. "
+                f"position_id={position_id}, name={name}, start_date={start_date}, end_date={end_date}"
+            )
 
         try:
-            if result_exists_in_s3(
-                position_id=position_id,
-                start_date=start_date,
-                end_date=end_date,
-            ):
-                return {
-                    "status": "failed",
-                    "stage": "precheck",
-                    "position_id": position_id,
-                    "name": name,
-                    "error": (
-                        "Data already exists in S3 for this period. "
-                        f"position={position_id}, start_date={start_date}, end_date={end_date}"
-                    ),
-                }
-
             result = _run_gemini_with_retries(
                 name=name,
                 position_id=position_id,
@@ -225,7 +216,14 @@ def latam_roles_pipeline():
                 role_aliases=role_aliases,
                 retries=2,
             )
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                f"[gemini] Failed Gemini processing. "
+                f"position_id={position_id}, name={name}, aliases={role_aliases}, "
+                f"start_date={start_date}, end_date={end_date}, error={exc}"
+            ) from exc
 
+        try:
             s3_key = write_result_to_s3(
                 result=result,
                 position_id=position_id,
@@ -233,26 +231,24 @@ def latam_roles_pipeline():
                 end_date=end_date,
                 fail_on_error=True,
             )
-
-            result.setdefault("storage", {})
-            result["storage"]["s3_bucket"] = os.environ.get("OUTPUT_BUCKET")
-            result["storage"]["s3_key"] = s3_key
-
-            return {
-                "status": "success",
-                "stage": "done",
-                "position_id": position_id,
-                "name": name,
-                "result": result,
-            }
         except Exception as exc:  # noqa: BLE001
-            return {
-                "status": "failed",
-                "stage": "processing",
-                "position_id": position_id,
-                "name": name,
-                "error": str(exc),
-            }
+            raise RuntimeError(
+                f"[s3] Failed S3 write. "
+                f"position_id={position_id}, name={name}, bucket={os.environ.get('OUTPUT_BUCKET')}, "
+                f"start_date={start_date}, end_date={end_date}, error={exc}"
+            ) from exc
+
+        result.setdefault("storage", {})
+        result["storage"]["s3_bucket"] = os.environ.get("OUTPUT_BUCKET")
+        result["storage"]["s3_key"] = s3_key
+
+        return {
+            "status": "success",
+            "stage": "done",
+            "position_id": position_id,
+            "name": name,
+            "result": result,
+        }
 
     @task(trigger_rule=TriggerRule.ALL_DONE)
     def notify_and_finalize(
@@ -264,8 +260,8 @@ def latam_roles_pipeline():
         - fails DAG at the end if any failed
         """
         results = role_results or []
-        successes = [r for r in results if (r or {}).get("status") == "success"]
-        failures = [r for r in results if (r or {}).get("status") != "success"]
+        successes = [r for r in results if isinstance(r, dict) and r.get("status") == "success"]
+        failures = [r for r in results if not isinstance(r, dict) or r.get("status") != "success"]
 
         total_positions = sum(
             int(((r.get("result") or {}).get("total_positions", 0) or 0))
@@ -307,4 +303,3 @@ def latam_roles_pipeline():
 
 
 dag = latam_roles_pipeline()
-
