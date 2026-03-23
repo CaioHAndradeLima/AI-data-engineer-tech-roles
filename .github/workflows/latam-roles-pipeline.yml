@@ -1,4 +1,4 @@
-name: LATAM Roles Pipeline (Ephemeral Infra)
+name: LATAM Roles Pipeline
 
 on:
   workflow_dispatch:
@@ -22,22 +22,23 @@ on:
         description: "Optional single position name. If empty, run all groups from positions.json."
         required: false
         type: string
-      destroy_after_run:
-        description: "Destroy Terraform resources after run"
+      apply_infra:
+        description: "Apply Terraform for persistent AWS infra before running"
         required: true
         default: true
         type: boolean
   schedule:
-    - cron: "0 3 1 * *" # day 1 of each month at 03:00 UTC
+    - cron: "0 3 1 * *"
 
 jobs:
   terraform-apply:
+    if: ${{ github.event_name == 'schedule' || github.event.inputs.apply_infra == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
     env:
-      AWS_REGION: us-east-1
+      AWS_REGION: ${{ vars.AWS_REGION }}
       ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
     outputs:
       results_bucket_name: ${{ steps.tf-outputs.outputs.results_bucket_name }}
@@ -45,7 +46,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (assume role via OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
@@ -68,32 +69,36 @@ jobs:
         id: tf-outputs
         run: |
           cd infra/terraform
-          BUCKET=$(terraform output -raw results_bucket_name)
-          echo "results_bucket_name=$BUCKET" >> "$GITHUB_OUTPUT"
+          echo "results_bucket_name=$(terraform output -raw results_bucket_name)" >> "$GITHUB_OUTPUT"
 
   airflow-run:
     runs-on: ubuntu-latest
-    needs: terraform-apply
+    needs: [terraform-apply]
+    if: ${{ always() && (needs.terraform-apply.result == 'success' || needs.terraform-apply.result == 'skipped') }}
     permissions:
       id-token: write
       contents: read
     env:
-      AWS_REGION: us-east-1
+      AWS_REGION: ${{ vars.AWS_REGION }}
       ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GOOGLE_CSE_API_KEY: ${{ secrets.GOOGLE_CSE_API_KEY }}
       GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
-      OUTPUT_BUCKET: ${{ needs.terraform-apply.outputs.results_bucket_name }}
+      OUTPUT_BUCKET: ${{ needs.terraform-apply.outputs.results_bucket_name || vars.OUTPUT_BUCKET }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       SLACK_CHANNEL: ${{ vars.SLACK_CHANNEL }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AIRFLOW_RUN_ID: gha_${{ github.run_id }}_${{ github.run_attempt }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Compute year/month
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Compute period
         id: period
         run: |
           INPUT_YEAR="${{ github.event.inputs.year }}"
@@ -109,7 +114,7 @@ jobs:
           echo "year=$YEAR" >> "$GITHUB_OUTPUT"
           echo "month=$MONTH" >> "$GITHUB_OUTPUT"
 
-      - name: Write .env.dev for docker-compose
+      - name: Write runtime env file
         run: |
           cat > .env.dev <<EOF
           GEMINI_API_KEY=${GEMINI_API_KEY}
@@ -122,69 +127,149 @@ jobs:
           AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
           AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
           AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
+          POSITIONS_CONFIG=/opt/airflow/project/positions.json
           EOF
 
-      - name: Build and start Airflow
-        run: |
-          make airflow-build
-          make airflow-init
-          make airflow-up
+      - name: Build Airflow image
+        run: make airflow-build
 
-      - name: Trigger DAG (single position)
-        if: ${{ github.event.inputs.position_name != '' }}
-        run: |
-          make airflow-trigger-dev \
-            POSITION_NAME="${{ github.event.inputs.position_name }}" \
-            YEAR="${{ steps.period.outputs.year }}" \
-            MONTH="${{ steps.period.outputs.month }}"
+      - name: Initialize Airflow
+        run: make airflow-init
 
-      - name: Trigger DAG (all groups)
-        if: ${{ github.event.inputs.position_name == '' }}
-        run: |
-          make airflow-trigger-all-dev \
-            YEAR="${{ steps.period.outputs.year }}" \
-            MONTH="${{ steps.period.outputs.month }}"
+      - name: Start Airflow services
+        run: make airflow-up
 
-      - name: Wait and print status
+      - name: Wait for Airflow readiness
         run: |
-          cd airflow
-          sleep 20
-          docker compose exec airflow-webserver airflow dags list-runs -d latam_roles_pipeline
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/health >/tmp/airflow-health.json; then
+              cat /tmp/airflow-health.json
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Airflow webserver did not become ready in time."
+          exit 1
 
-      - name: Stop local Airflow stack
+      - name: Trigger DAG
+        run: |
+          if [ -n "${{ github.event.inputs.position_name }}" ]; then
+            cd airflow && docker compose exec -T airflow-webserver \
+              airflow dags trigger latam_roles_pipeline \
+              --run-id "${AIRFLOW_RUN_ID}" \
+              --conf "$(printf '{"position_name":"%s","year":"%s","month":"%s"}' "${{ github.event.inputs.position_name }}" "${{ steps.period.outputs.year }}" "${{ steps.period.outputs.month }}")"
+          else
+            cd airflow && docker compose exec -T airflow-webserver \
+              airflow dags trigger latam_roles_pipeline \
+              --run-id "${AIRFLOW_RUN_ID}" \
+              --conf "$(printf '{"year":"%s","month":"%s"}' "${{ steps.period.outputs.year }}" "${{ steps.period.outputs.month }}")"
+          fi
+
+      - name: Poll DAG state
+        run: |
+          mkdir -p artifacts
+          for i in $(seq 1 120); do
+            cd airflow
+            docker compose exec -T airflow-webserver airflow dags list-runs -d latam_roles_pipeline -o json > ../artifacts/dag-runs.json
+            cd ..
+            DAG_STATE=$(python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+run_id = os.environ["AIRFLOW_RUN_ID"]
+rows = json.loads(Path("artifacts/dag-runs.json").read_text() or "[]")
+match = next((row for row in rows if row.get("run_id") == run_id), None)
+print((match or {}).get("state", "not_found"))
+PY
+)
+            echo "Current DAG state: ${DAG_STATE}"
+            if [ "${DAG_STATE}" = "success" ]; then
+              echo "dag_state=success" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            if [ "${DAG_STATE}" = "failed" ]; then
+              echo "dag_state=failed" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "dag_state=timeout" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Collect task states
         if: always()
         run: |
-          make airflow-down
+          mkdir -p artifacts
+          cd airflow
+          docker compose exec -T airflow-webserver airflow tasks states-for-dag-run latam_roles_pipeline "${AIRFLOW_RUN_ID}" > ../artifacts/task-states.txt || true
+          docker compose logs --no-color > ../artifacts/docker-compose.log || true
 
-  terraform-destroy:
-    runs-on: ubuntu-latest
-    needs: [terraform-apply, airflow-run]
-    if: ${{ always() && (github.event_name == 'schedule' || github.event.inputs.destroy_after_run == 'true') }}
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      AWS_REGION: us-east-1
-      ENVIRONMENT: ${{ github.event.inputs.environment || 'prod' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Collect failing task logs
+        if: always()
+        run: |
+          mkdir -p artifacts/task-logs
+          python3 - <<'PY'
+from pathlib import Path
 
-      - name: Configure AWS credentials (assume role via OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+text = Path("artifacts/task-states.txt").read_text() if Path("artifacts/task-states.txt").exists() else ""
+failed = []
+for line in text.splitlines():
+    parts = line.split()
+    if len(parts) >= 2 and parts[-1].lower() == "failed":
+        failed.append(parts[0])
+Path("artifacts/failed-task-ids.txt").write_text("\n".join(failed))
+PY
+          if [ -s artifacts/failed-task-ids.txt ]; then
+            while IFS= read -r task_id; do
+              [ -z "$task_id" ] && continue
+              cd airflow
+              docker compose exec -T airflow-webserver airflow tasks logs latam_roles_pipeline "$task_id" "${AIRFLOW_RUN_ID}" > "../artifacts/task-logs/${task_id}.log" || true
+              cd ..
+            done < artifacts/failed-task-ids.txt
+          fi
+
+      - name: Write run summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+summary = {
+    "dag_id": "latam_roles_pipeline",
+    "run_id": os.environ.get("AIRFLOW_RUN_ID"),
+    "dag_state": os.environ.get("dag_state", "unknown"),
+    "year": "${{ steps.period.outputs.year }}",
+    "month": "${{ steps.period.outputs.month }}",
+    "position_name": "${{ github.event.inputs.position_name }}",
+    "environment": os.environ.get("ENVIRONMENT"),
+}
+Path("artifacts/run-summary.json").write_text(json.dumps(summary, indent=2))
+PY
+
+      - name: Upload Airflow artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          name: airflow-run-artifacts-${{ github.run_id }}
+          path: artifacts
+          if-no-files-found: warn
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Stop Airflow stack
+        if: always()
+        run: make airflow-down
 
-      - name: Terraform init
+      - name: Fail workflow if DAG failed
+        if: always()
         run: |
-          cd infra/terraform
-          terraform init -backend-config="key=latam-roles/${ENVIRONMENT}.tfstate"
-
-      - name: Terraform destroy
-        run: |
-          cd infra/terraform
-          terraform destroy -auto-approve -var="environment=${ENVIRONMENT}" -var-file="${ENVIRONMENT}.tfvars"
+          if [ "${dag_state}" = "success" ]; then
+            exit 0
+          fi
+          if [ "${dag_state}" = "failed" ]; then
+            echo "Airflow DAG failed. See uploaded artifacts for details."
+            exit 1
+          fi
+          echo "Airflow DAG did not reach success. Final state: ${dag_state:-unknown}"
+          exit 1

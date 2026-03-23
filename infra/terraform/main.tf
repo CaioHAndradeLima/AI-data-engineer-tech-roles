@@ -122,11 +122,11 @@ data "aws_iam_policy_document" "github_assume_role" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # Restrict to a specific GitHub repo. Replace OWNER/REPO with your values.
+    # Restrict to this GitHub repo.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:OWNER/REPO:*"]
+      values   = ["repo:CaioHAndradeLima/AI-data-engineer-tech-roles:*"]
     }
   }
 }
@@ -184,4 +184,3 @@ output "glue_database_name" {
 output "glue_table_name" {
   value = aws_glue_catalog_table.roles_ai_estimates.name
 }
-
