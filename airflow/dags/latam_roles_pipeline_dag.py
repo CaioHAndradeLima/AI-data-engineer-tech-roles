@@ -6,6 +6,8 @@ from typing import Any, Dict, List
 import pendulum
 from airflow.decorators import dag, task
 from airflow.operators.python import get_current_context
+from airflow.utils.session import provide_session
+from airflow.models.taskinstance import TaskInstance
 from airflow.utils.trigger_rule import TriggerRule
 
 from pipeline import (
@@ -113,6 +115,28 @@ def _run_gemini_with_retries(
     raise RuntimeError(
         f"Gemini run failed after {attempts} attempts for position_id={position_id}: {last_error}"
     )
+
+
+@provide_session
+def _list_failed_mapped_tasks(*, dag_id: str, run_id: str, session=None) -> List[Dict[str, Any]]:
+    rows = (
+        session.query(TaskInstance)
+        .filter(
+            TaskInstance.dag_id == dag_id,
+            TaskInstance.run_id == run_id,
+            TaskInstance.state == "failed",
+        )
+        .order_by(TaskInstance.task_id, TaskInstance.map_index)
+        .all()
+    )
+    return [
+        {
+            "task_id": row.task_id,
+            "map_index": row.map_index,
+            "state": row.state,
+        }
+        for row in rows
+    ]
 
 
 @dag(
@@ -259,6 +283,13 @@ def latam_roles_pipeline():
         - prints success/failure per role
         - fails DAG at the end if any failed
         """
+        context = get_current_context()
+        dag_run = context.get("dag_run")
+        failed_task_instances = _list_failed_mapped_tasks(
+            dag_id="latam_roles_pipeline",
+            run_id=dag_run.run_id,
+        )
+
         results = role_results or []
         successes = [r for r in results if isinstance(r, dict) and r.get("status") == "success"]
         failures = [r for r in results if not isinstance(r, dict) or r.get("status") != "success"]
@@ -289,9 +320,17 @@ def latam_roles_pipeline():
                 f"stage={item.get('stage')} error={item.get('error')}"
             )
 
-        if failures:
+        for task_failure in failed_task_instances:
+            print(
+                "FAILED_TASK_INSTANCE "
+                f"task_id={task_failure.get('task_id')} "
+                f"map_index={task_failure.get('map_index')} "
+                f"state={task_failure.get('state')}"
+            )
+
+        if failures or failed_task_instances:
             raise RuntimeError(
-                f"Run finished with failures ({len(failures)}). "
+                f"Run finished with failures ({len(failures) + len(failed_task_instances)}). "
                 "All mapped roles were attempted."
             )
 

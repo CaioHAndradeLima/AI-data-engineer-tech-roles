@@ -230,9 +230,9 @@ jobs:
               [ -z "$task_id" ] && continue
               cd airflow
               if [ -n "$map_index" ] && [ "$map_index" != "None" ]; then
-                docker compose exec -T airflow-webserver airflow tasks logs latam_roles_pipeline "$task_id" "${AIRFLOW_RUN_ID}" --map-index "$map_index" > "../artifacts/task-logs/${task_id}_${map_index}.log" || true
+                docker compose exec -T airflow-webserver sh -lc "cat /opt/airflow/logs/dag_id=latam_roles_pipeline/run_id=${AIRFLOW_RUN_ID}/task_id=${task_id}/map_index=${map_index}/attempt=*.log" > "../artifacts/task-logs/${task_id}_${map_index}.log" || true
               else
-                docker compose exec -T airflow-webserver airflow tasks logs latam_roles_pipeline "$task_id" "${AIRFLOW_RUN_ID}" > "../artifacts/task-logs/${task_id}.log" || true
+                docker compose exec -T airflow-webserver sh -lc "cat /opt/airflow/logs/dag_id=latam_roles_pipeline/run_id=${AIRFLOW_RUN_ID}/task_id=${task_id}/attempt=*.log" > "../artifacts/task-logs/${task_id}.log" || true
               fi
               cd ..
             done < artifacts/failed-task-ids.txt
@@ -241,7 +241,7 @@ jobs:
       - name: Write run summary
         if: always()
         run: |
-          python3 -c 'import json, os; from pathlib import Path; summary = {"dag_id": "latam_roles_pipeline", "run_id": os.environ.get("AIRFLOW_RUN_ID"), "dag_state": os.environ.get("dag_state", "unknown"), "year": "${{ steps.period.outputs.year }}", "month": "${{ steps.period.outputs.month }}", "position_name": "${{ github.event.inputs.position_name }}", "environment": os.environ.get("ENVIRONMENT")}; Path("artifacts/run-summary.json").write_text(json.dumps(summary, indent=2))'
+          python3 -c 'import json, os; from pathlib import Path; failed = []; meta = Path("artifacts/failed-task-meta.json"); failed = json.loads(meta.read_text()) if meta.exists() and meta.read_text().strip() else []; dag_state = os.environ.get("dag_state", "unknown"); dag_state = "failed" if failed else dag_state; summary = {"dag_id": "latam_roles_pipeline", "run_id": os.environ.get("AIRFLOW_RUN_ID"), "dag_state": dag_state, "year": "${{ steps.period.outputs.year }}", "month": "${{ steps.period.outputs.month }}", "position_name": "${{ github.event.inputs.position_name }}", "environment": os.environ.get("ENVIRONMENT"), "failed_task_count": len(failed)}; Path("artifacts/run-summary.json").write_text(json.dumps(summary, indent=2))'
 
       - name: Upload Airflow artifacts
         if: always()
