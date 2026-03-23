@@ -133,6 +133,9 @@ jobs:
       - name: Build Airflow image
         run: make airflow-build
 
+      - name: Prepare Airflow log directory
+        run: mkdir -p airflow/logs
+
       - name: Initialize Airflow
         run: make airflow-init
 
@@ -225,16 +228,14 @@ jobs:
           if [ -s artifacts/failed-task-meta.json ]; then
             python3 -c 'import json; from pathlib import Path; data = json.loads(Path("artifacts/failed-task-meta.json").read_text()); print("\n".join([f"{item.get(\"task_id\")}|{item.get(\"map_index\")}" for item in data]))' > artifacts/failed-task-ids.txt
           fi
-          cd airflow
-          docker compose exec -T airflow-webserver sh -lc "find /opt/airflow/logs -type f | grep '${AIRFLOW_RUN_ID}'" > ../artifacts/task-log-paths.txt || true
-          if [ -s ../artifacts/task-log-paths.txt ]; then
+          find airflow/logs -type f | grep "${AIRFLOW_RUN_ID}" > artifacts/task-log-paths.txt || true
+          if [ -s artifacts/task-log-paths.txt ]; then
             while IFS= read -r log_path; do
               [ -z "$log_path" ] && continue
-              safe_name=$(printf '%s' "$log_path" | sed 's#^/opt/airflow/logs/##; s#/#__#g')
-              docker compose exec -T airflow-webserver sh -lc "cat '$log_path'" > "../artifacts/task-logs/${safe_name}" || true
-            done < ../artifacts/task-log-paths.txt
+              safe_name=$(printf '%s' "$log_path" | sed 's#^airflow/logs/##; s#/#__#g')
+              cat "$log_path" > "artifacts/task-logs/${safe_name}" || true
+            done < artifacts/task-log-paths.txt
           fi
-          cd ..
 
       - name: Write run summary
         if: always()
