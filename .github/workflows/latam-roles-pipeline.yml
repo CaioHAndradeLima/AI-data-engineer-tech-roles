@@ -172,17 +172,7 @@ jobs:
             cd airflow
             docker compose exec -T airflow-webserver airflow dags list-runs -d latam_roles_pipeline -o json > ../artifacts/dag-runs.json
             cd ..
-            DAG_STATE=$(python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-
-run_id = os.environ["AIRFLOW_RUN_ID"]
-rows = json.loads(Path("artifacts/dag-runs.json").read_text() or "[]")
-match = next((row for row in rows if row.get("run_id") == run_id), None)
-print((match or {}).get("state", "not_found"))
-PY
-)
+            DAG_STATE=$(python3 -c 'import json, os; from pathlib import Path; run_id = os.environ["AIRFLOW_RUN_ID"]; rows = json.loads(Path("artifacts/dag-runs.json").read_text() or "[]"); match = next((row for row in rows if row.get("run_id") == run_id), None); print((match or {}).get("state", "not_found"))')
             echo "Current DAG state: ${DAG_STATE}"
             if [ "${DAG_STATE}" = "success" ]; then
               echo "dag_state=success" >> "$GITHUB_ENV"
@@ -209,17 +199,7 @@ PY
         if: always()
         run: |
           mkdir -p artifacts/task-logs
-          python3 - <<'PY'
-from pathlib import Path
-
-text = Path("artifacts/task-states.txt").read_text() if Path("artifacts/task-states.txt").exists() else ""
-failed = []
-for line in text.splitlines():
-    parts = line.split()
-    if len(parts) >= 2 and parts[-1].lower() == "failed":
-        failed.append(parts[0])
-Path("artifacts/failed-task-ids.txt").write_text("\n".join(failed))
-PY
+          python3 -c 'from pathlib import Path; text = Path("artifacts/task-states.txt").read_text() if Path("artifacts/task-states.txt").exists() else ""; failed = []; [failed.append(line.split()[0]) for line in text.splitlines() if len(line.split()) >= 2 and line.split()[-1].lower() == "failed"]; Path("artifacts/failed-task-ids.txt").write_text("\n".join(failed))'
           if [ -s artifacts/failed-task-ids.txt ]; then
             while IFS= read -r task_id; do
               [ -z "$task_id" ] && continue
@@ -232,22 +212,7 @@ PY
       - name: Write run summary
         if: always()
         run: |
-          python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-
-summary = {
-    "dag_id": "latam_roles_pipeline",
-    "run_id": os.environ.get("AIRFLOW_RUN_ID"),
-    "dag_state": os.environ.get("dag_state", "unknown"),
-    "year": "${{ steps.period.outputs.year }}",
-    "month": "${{ steps.period.outputs.month }}",
-    "position_name": "${{ github.event.inputs.position_name }}",
-    "environment": os.environ.get("ENVIRONMENT"),
-}
-Path("artifacts/run-summary.json").write_text(json.dumps(summary, indent=2))
-PY
+          python3 -c 'import json, os; from pathlib import Path; summary = {"dag_id": "latam_roles_pipeline", "run_id": os.environ.get("AIRFLOW_RUN_ID"), "dag_state": os.environ.get("dag_state", "unknown"), "year": "${{ steps.period.outputs.year }}", "month": "${{ steps.period.outputs.month }}", "position_name": "${{ github.event.inputs.position_name }}", "environment": os.environ.get("ENVIRONMENT")}; Path("artifacts/run-summary.json").write_text(json.dumps(summary, indent=2))'
 
       - name: Upload Airflow artifacts
         if: always()
