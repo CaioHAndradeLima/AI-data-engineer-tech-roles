@@ -225,10 +225,20 @@ def latam_roles_pipeline():
             start_date=start_date,
             end_date=end_date,
         ):
-            raise RuntimeError(
+            print(
                 f"[precheck] Data already exists in S3 for this period. "
                 f"position_id={position_id}, name={name}, start_date={start_date}, end_date={end_date}"
             )
+            return {
+                "status": "already_exists",
+                "stage": "precheck",
+                "position_id": position_id,
+                "name": name,
+                "error": (
+                    "Data already exists in S3 for this period. "
+                    f"start_date={start_date}, end_date={end_date}"
+                ),
+            }
 
         try:
             result = _run_gemini_with_retries(
@@ -292,7 +302,15 @@ def latam_roles_pipeline():
 
         results = role_results or []
         successes = [r for r in results if isinstance(r, dict) and r.get("status") == "success"]
-        failures = [r for r in results if not isinstance(r, dict) or r.get("status") != "success"]
+        already_exists = [
+            r for r in results if isinstance(r, dict) and r.get("status") == "already_exists"
+        ]
+        failures = [
+            r
+            for r in results
+            if not isinstance(r, dict)
+            or r.get("status") not in {"success", "already_exists"}
+        ]
 
         total_positions = sum(
             int(((r.get("result") or {}).get("total_positions", 0) or 0))
@@ -304,6 +322,7 @@ def latam_roles_pipeline():
             f"- Requested month: {run_meta.get('year')}-{str(run_meta.get('month')).zfill(2)}\n"
             f"- Period: {run_meta.get('start_date')} to {run_meta.get('end_date')}\n"
             f"- Success count: {len(successes)}\n"
+            f"- Already exists count: {len(already_exists)}\n"
             f"- Failure count: {len(failures)}\n"
             f"- Total positions found (sum): {total_positions}"
         )
@@ -320,7 +339,17 @@ def latam_roles_pipeline():
                 f"stage={item.get('stage')} error={item.get('error')}"
             )
 
-        for task_failure in failed_task_instances:
+        for item in already_exists:
+            print(
+                f"ALREADY_EXISTS position_id={item.get('position_id')} "
+                f"stage={item.get('stage')} error={item.get('error')}"
+            )
+
+        actionable_failed_task_instances = [
+            item for item in failed_task_instances if item.get("task_id") != "notify_and_finalize"
+        ]
+
+        for task_failure in actionable_failed_task_instances:
             print(
                 "FAILED_TASK_INSTANCE "
                 f"task_id={task_failure.get('task_id')} "
@@ -328,9 +357,9 @@ def latam_roles_pipeline():
                 f"state={task_failure.get('state')}"
             )
 
-        if failures or failed_task_instances:
+        if failures or actionable_failed_task_instances:
             raise RuntimeError(
-                f"Run finished with failures ({len(failures) + len(failed_task_instances)}). "
+                f"Run finished with failures ({len(failures) + len(actionable_failed_task_instances)}). "
                 "All mapped roles were attempted."
             )
 
