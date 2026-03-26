@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 import pandas as pd
@@ -17,6 +18,13 @@ from data_loader import (
 
 load_runtime_env()
 
+BACKGROUND_IMAGE = Path(__file__).resolve().parent / "assets-dark.jpg"
+BACKGROUND_B64 = (
+    base64.b64encode(BACKGROUND_IMAGE.read_bytes()).decode("utf-8")
+    if BACKGROUND_IMAGE.exists()
+    else ""
+)
+
 st.set_page_config(
     page_title="LATAM Roles Observatory",
     page_icon="📊",
@@ -24,26 +32,24 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.markdown(
-    """
+CSS_TEMPLATE = """
     <style>
     :root {
         --ink: #f5f7fb;
         --muted: #d7deea;
-        --panel: rgba(148, 163, 184, 0.18);
-        --panel-strong: rgba(15, 23, 42, 0.5);
-        --panel-soft: rgba(255, 255, 255, 0.14);
-        --line: rgba(255, 255, 255, 0.16);
-        --accent: #8ec5ff;
-        --warm: #ffb86b;
+        --glass-fill: rgba(255, 255, 255, 0.15);
+        --glass-fill-soft: rgba(255, 255, 255, 0.10);
+        --glass-border: rgba(255, 255, 255, 0.58);
+        --glass-shadow: rgba(31, 38, 135, 0.18);
         --mint: #90f3c4;
     }
     .stApp {
         background:
-            radial-gradient(circle at 16% 20%, rgba(255, 184, 107, 0.18), transparent 18%),
-            radial-gradient(circle at 78% 14%, rgba(120, 179, 255, 0.18), transparent 20%),
-            radial-gradient(circle at 52% 76%, rgba(144, 243, 196, 0.08), transparent 18%),
-            linear-gradient(135deg, #111624 0%, #181f30 42%, #1d2433 100%);
+            linear-gradient(135deg, rgba(18, 20, 24, 0.52) 0%, rgba(24, 26, 31, 0.48) 46%, rgba(28, 30, 35, 0.50) 100%),
+            url("data:image/jpeg;base64,__BACKGROUND_B64__");
+        background-size: cover;
+        background-position: center center;
+        background-attachment: fixed;
         color: var(--ink);
     }
     .block-container {
@@ -53,8 +59,8 @@ st.markdown(
     .ambient-orb {
         position: fixed;
         border-radius: 999px;
-        filter: blur(80px);
-        opacity: 0.6;
+        filter: blur(90px);
+        opacity: 0.14;
         z-index: -1;
         pointer-events: none;
     }
@@ -63,28 +69,29 @@ st.markdown(
         height: 320px;
         top: 80px;
         left: 280px;
-        background: rgba(255, 179, 71, 0.16);
+        background: rgba(255, 255, 255, 0.08);
     }
     .orb-b {
         width: 380px;
         height: 380px;
         top: 220px;
         right: 140px;
-        background: rgba(82, 168, 255, 0.16);
+        background: rgba(255, 255, 255, 0.06);
     }
     .orb-c {
         width: 280px;
         height: 280px;
         bottom: 40px;
         left: 45%;
-        background: rgba(104, 255, 190, 0.12);
+        background: rgba(255, 255, 255, 0.04);
     }
     [data-testid="stSidebar"] {
         background:
-            linear-gradient(180deg, rgba(11, 17, 30, 0.88) 0%, rgba(18, 24, 38, 0.82) 100%);
-        backdrop-filter: blur(24px);
-        -webkit-backdrop-filter: blur(24px);
-        border-right: 1px solid var(--line);
+            linear-gradient(180deg, rgba(16, 18, 23, 0.64) 0%, rgba(20, 22, 27, 0.58) 100%);
+        backdrop-filter: blur(20px) saturate(160%);
+        -webkit-backdrop-filter: blur(20px) saturate(160%);
+        border-right: 1px solid rgba(255, 255, 255, 0.14);
+        box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04);
     }
     [data-testid="stSidebar"] * {
         color: var(--ink);
@@ -103,14 +110,43 @@ st.markdown(
         border-color: rgba(142, 197, 255, 0.28);
         background: rgba(255, 255, 255, 0.08);
     }
+    [data-testid="stMetric"],
+    [data-testid="stPlotlyChart"],
+    [data-testid="stDataFrame"],
+    .summary-card {
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+        background: var(--glass-fill);
+        backdrop-filter: blur(2px) saturate(180%);
+        -webkit-backdrop-filter: blur(2px) saturate(180%);
+        border: 1px solid var(--glass-border);
+        box-shadow:
+            0 8px 32px var(--glass-shadow),
+            inset 0 4px 20px rgba(255, 255, 255, 0.22);
+    }
+    [data-testid="stMetric"]::after,
+    [data-testid="stPlotlyChart"]::after,
+    [data-testid="stDataFrame"]::after,
+    .summary-card::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: var(--glass-fill-soft);
+        border-radius: inherit;
+        backdrop-filter: blur(1px);
+        -webkit-backdrop-filter: blur(1px);
+        box-shadow:
+            inset -10px -8px 0 -11px rgba(255, 255, 255, 0.95),
+            inset 0 -9px 0 -8px rgba(255, 255, 255, 0.95);
+        opacity: 0.6;
+        z-index: -1;
+        filter: blur(1px) drop-shadow(10px 4px 6px rgba(0, 0, 0, 0.55)) brightness(115%);
+        pointer-events: none;
+    }
     [data-testid="stMetric"] {
-        background: linear-gradient(180deg, rgba(42, 49, 67, 0.34) 0%, rgba(27, 35, 51, 0.2) 100%);
-        backdrop-filter: blur(28px);
-        -webkit-backdrop-filter: blur(28px);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 24px;
+        border-radius: 2rem;
         padding: 1rem 1.05rem;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 44px rgba(0, 0, 0, 0.12);
     }
     [data-testid="stMetricLabel"] {
         color: var(--muted);
@@ -122,17 +158,11 @@ st.markdown(
         color: var(--mint);
     }
     [data-testid="stPlotlyChart"] {
-        background: transparent;
-        border: none;
-        padding: 0;
-        box-shadow: none;
+        border-radius: 2rem;
+        padding: 0.85rem;
     }
     [data-testid="stDataFrame"] {
-        background: linear-gradient(180deg, rgba(19, 27, 43, 0.48) 0%, rgba(19, 27, 43, 0.34) 100%);
-        backdrop-filter: blur(18px);
-        -webkit-backdrop-filter: blur(18px);
-        border-radius: 22px;
-        border: 1px solid var(--line);
+        border-radius: 2rem;
         padding: 0.35rem;
     }
     h1, h2, h3 {
@@ -155,15 +185,11 @@ st.markdown(
         font-weight: 800;
         line-height: 1.05;
         margin: 0 0 1.2rem 0.15rem;
+        text-shadow: 0 2px 14px rgba(0, 0, 0, 0.24);
     }
     .summary-card {
-        background: linear-gradient(180deg, rgba(173, 180, 194, 0.24) 0%, rgba(109, 120, 142, 0.16) 100%);
-        backdrop-filter: blur(28px);
-        -webkit-backdrop-filter: blur(28px);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        border-radius: 24px;
+        border-radius: 2rem;
         padding: 1rem 1.1rem;
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 40px rgba(0, 0, 0, 0.1);
         color: var(--ink);
     }
     .summary-card code {
@@ -173,7 +199,10 @@ st.markdown(
         padding: 0.12rem 0.35rem;
     }
     </style>
-    """,
+    """
+
+st.markdown(
+    CSS_TEMPLATE.replace("__BACKGROUND_B64__", BACKGROUND_B64),
     unsafe_allow_html=True,
 )
 
@@ -265,7 +294,7 @@ with col_left:
         height=360,
         margin=dict(l=20, r=20, t=10, b=20),
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(255,255,255,0.06)",
+        plot_bgcolor="rgba(255,255,255,0.045)",
         xaxis_title="Month",
         yaxis_title="Estimated Open Positions",
         font=dict(color="#eef2ff"),
@@ -290,7 +319,7 @@ with col_left:
             height=420,
             margin=dict(l=20, r=20, t=10, b=20),
             paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(255,255,255,0.05)",
+            plot_bgcolor="rgba(255,255,255,0.045)",
             xaxis_title="Estimated Mentions",
             yaxis_title="Technology",
             coloraxis_showscale=False,
@@ -331,7 +360,7 @@ with col_right:
             margin=dict(l=20, r=20, t=20, b=20),
             paper_bgcolor="rgba(0,0,0,0)",
             polar=dict(
-                bgcolor="rgba(255,255,255,0.04)",
+                bgcolor="rgba(255,255,255,0.045)",
                 radialaxis=dict(
                     showticklabels=True,
                     ticksuffix="%",
@@ -392,7 +421,7 @@ else:
         height=420,
         margin=dict(l=20, r=20, t=10, b=20),
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(255,255,255,0.05)",
+        plot_bgcolor="rgba(255,255,255,0.045)",
         xaxis_title="Month",
         yaxis_title="Share Of Positions Mentioning Technology (%)",
         legend_title="Technology",
