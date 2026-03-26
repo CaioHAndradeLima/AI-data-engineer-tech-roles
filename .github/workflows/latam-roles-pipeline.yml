@@ -228,7 +228,7 @@ jobs:
           mkdir -p artifacts/task-logs
           python3 -c 'import json; from pathlib import Path; text = Path("artifacts/task-states.txt").read_text() if Path("artifacts/task-states.txt").exists() else ""; failed = []; [failed.append({"task_id": parts[2], "map_index": parts[6]}) for line in text.splitlines() if "|" in line and not line.lstrip().startswith("dag_id") and not line.startswith("=") for parts in [[p.strip() for p in line.split("|")]] if len(parts) >= 7 and parts[3].lower() == "failed"]; Path("artifacts/failed-task-meta.json").write_text(json.dumps(failed, indent=2))'
           if [ -s artifacts/failed-task-meta.json ]; then
-            python3 -c 'import json; from pathlib import Path; data = json.loads(Path("artifacts/failed-task-meta.json").read_text()); print("\n".join([f"{item.get(\"task_id\")}|{item.get(\"map_index\")}" for item in data]))' > artifacts/failed-task-ids.txt
+            python3 -c 'import json; from pathlib import Path; data = json.loads(Path("artifacts/failed-task-meta.json").read_text()); print("\n".join(["{}|{}".format(item.get("task_id"), item.get("map_index")) for item in data]))' > artifacts/failed-task-ids.txt
           fi
           find airflow/logs -type f | grep "${AIRFLOW_RUN_ID}" > artifacts/task-log-paths.txt || true
           if [ -s artifacts/task-log-paths.txt ]; then
