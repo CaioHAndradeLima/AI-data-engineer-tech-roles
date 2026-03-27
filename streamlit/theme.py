@@ -211,11 +211,37 @@ def build_css(background_b64: str, theme: ThemeConfig = DEFAULT_THEME) -> str:
         border-radius: 999px;
         backdrop-filter: blur(18px) saturate(145%);
         -webkit-backdrop-filter: blur(18px) saturate(145%);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+        outline: none !important;
+    }}
+    [data-testid="stSidebar"] [data-testid="stTextInput"],
+    [data-testid="stSidebar"] [data-testid="stTextInput"] > div,
+    [data-testid="stSidebar"] [data-baseweb="input"],
+    [data-testid="stSidebar"] [data-baseweb="input"] > div:focus-within,
+    [data-testid="stSidebar"] [data-baseweb="input"]:focus-within,
+    [data-testid="stSidebar"] [data-baseweb="input"]:has(input:focus),
+    [data-testid="stSidebar"] [data-baseweb="input"] > div:has(input:focus) {{
+        outline: none !important;
+        border-color: rgba(255, 255, 255, 0.16) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+    }}
+    [data-testid="stSidebar"] [data-baseweb="input"] > div::before,
+    [data-testid="stSidebar"] [data-baseweb="input"] > div::after {{
+        border: 0 !important;
+        box-shadow: none !important;
+        outline: none !important;
     }}
     [data-testid="stSidebar"] input {{
         color: var(--ink) !important;
         font-size: 0.98rem !important;
+        outline: none !important;
+        box-shadow: none !important;
+    }}
+    [data-testid="stSidebar"] input:focus,
+    [data-testid="stSidebar"] input:focus-visible {{
+        outline: none !important;
+        box-shadow: none !important;
+        border: 0 !important;
     }}
     [data-testid="stSidebar"] input::placeholder {{
         color: rgba(255, 255, 255, 0.58) !important;
