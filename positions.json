@@ -14,6 +14,11 @@
       "id": "data_analyst",
       "role": ["Data Analyst", "Senior Data Analyst", "BI Analyst"],
       "extra_terms": "BI analytics SQL"
+    },
+    {
+      "id": "android_developer",
+      "role": ["Android Developer", "Android Engineer", "Senior Android Engineer", "Senior Android Developer"],
+      "extra_terms": "jetpack compose"
     }
   ]
 }
