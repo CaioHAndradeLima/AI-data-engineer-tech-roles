@@ -146,6 +146,11 @@ def build_css(background_b64: str, theme: ThemeConfig = DEFAULT_THEME) -> str:
     [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:has([data-baseweb="input"]) {{
         margin-bottom: 0.7rem;
     }}
+    [data-testid="stSidebar"] [data-testid="stTextInput"] small,
+    [data-testid="stSidebar"] [data-testid="stTextInput"] p,
+    [data-testid="stSidebar"] [data-testid="InputInstructions"] {{
+        display: none !important;
+    }}
     [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:has(.role-list-hook) {{
         background: rgba(255, 255, 255, 0.11);
         border: 1px solid rgba(255, 255, 255, 0.28);

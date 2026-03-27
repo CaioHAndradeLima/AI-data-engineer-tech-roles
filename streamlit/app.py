@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import streamlit.components.v1 as components
 
 from data_loader import (
     average_keyword_share,
@@ -63,6 +64,11 @@ positions = load_position_groups()
 if not positions:
     render_empty_state("No roles found in positions.json.")
 
+all_role_labels = {item["name"]: item for item in positions}
+selected_name = st.session_state.get("selected_role_name", positions[0]["name"])
+if selected_name not in all_role_labels:
+    selected_name = positions[0]["name"]
+
 with st.sidebar:
     search_value = st.text_input(
         "Search roles",
@@ -77,24 +83,46 @@ with st.sidebar:
         st.caption("No roles match your search.")
         st.stop()
 
-    role_labels = {item["name"]: item for item in filtered_positions}
-    default_role = st.session_state.get("selected_role_name", filtered_positions[0]["name"])
-    if default_role not in role_labels:
-        default_role = filtered_positions[0]["name"]
-
-    selected_name = default_role
     with st.container():
         st.markdown('<div class="role-list-hook"></div>', unsafe_allow_html=True)
-        for role_name in role_labels:
+        for role_name in [item["name"] for item in filtered_positions]:
             if st.button(
                 role_name,
-                key=f"role_picker_{role_labels[role_name]['id']}",
+                key=f"role_picker_{all_role_labels[role_name]['id']}",
                 use_container_width=True,
                 type="secondary",
             ):
                 st.session_state["selected_role_name"] = role_name
                 st.rerun()
-    selected_role = role_labels[selected_name]
+
+selected_role = all_role_labels[selected_name]
+
+components.html(
+    """
+    <script>
+    const root = window.parent.document;
+    function bindInstantSearch() {
+      const sidebar = root.querySelector('[data-testid="stSidebar"]');
+      if (!sidebar) return;
+      const input = sidebar.querySelector('input[placeholder="Search role or alias"]');
+      if (!input || input.dataset.instantSearchBound === "1") return;
+      input.dataset.instantSearchBound = "1";
+      let timer = null;
+      input.addEventListener("input", () => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => {
+          input.dispatchEvent(new KeyboardEvent("keydown", {key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true}));
+          input.dispatchEvent(new KeyboardEvent("keyup", {key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true}));
+          input.dispatchEvent(new Event("change", {bubbles: true}));
+        }, 90);
+      });
+    }
+    bindInstantSearch();
+    new MutationObserver(bindInstantSearch).observe(root.body, {childList: true, subtree: true});
+    </script>
+    """,
+    height=0,
+)
 
 st.markdown(f'<h1 class="title">{selected_role["name"]}</h1>', unsafe_allow_html=True)
 
