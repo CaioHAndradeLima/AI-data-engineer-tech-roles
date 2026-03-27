@@ -14,6 +14,7 @@ from data_loader import (
     load_runtime_env,
     top_keywords_for_record,
 )
+from theme import build_css
 
 
 load_runtime_env()
@@ -32,209 +33,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-CSS_TEMPLATE = """
-    <style>
-    :root {
-        --ink: #ffffff;
-        --muted: #eef2f7;
-        --glass-fill: rgba(255, 255, 255, 0.15);
-        --glass-fill-soft: rgba(255, 255, 255, 0.10);
-        --glass-border: rgba(255, 255, 255, 0.58);
-        --glass-shadow: rgba(31, 38, 135, 0.18);
-        --mint: #90f3c4;
-    }
-    .stApp {
-        background: linear-gradient(135deg, #111317 0%, #191c22 46%, #1f232a 100%);
-        color: var(--ink);
-        position: relative;
-        overflow: hidden;
-        isolation: isolate;
-    }
-    .stApp > * {
-        position: relative;
-        z-index: 2;
-    }
-    .stApp::before {
-        content: "";
-        position: fixed;
-        inset: -40px;
-        background-image: url("data:image/jpeg;base64,__BACKGROUND_B64__");
-        background-size: cover;
-        background-position: center center;
-        background-repeat: no-repeat;
-        filter: blur(42px) brightness(0.42) saturate(0.82);
-        transform: scale(1.08);
-        pointer-events: none;
-        z-index: -2;
-    }
-    .stApp::after {
-        content: "";
-        position: fixed;
-        inset: 0;
-        background: linear-gradient(135deg, rgba(17, 19, 23, 0.42) 0%, rgba(25, 28, 34, 0.36) 46%, rgba(31, 35, 42, 0.42) 100%);
-        pointer-events: none;
-        z-index: -1;
-    }
-    .block-container {
-        padding-top: 1.4rem;
-        padding-bottom: 2rem;
-        position: relative;
-        z-index: 3;
-    }
-    .ambient-orb {
-        position: fixed;
-        border-radius: 999px;
-        filter: blur(120px);
-        opacity: 0.05;
-        z-index: -3;
-        pointer-events: none;
-    }
-    .orb-a {
-        width: 320px;
-        height: 320px;
-        top: 80px;
-        left: 280px;
-        background: rgba(255, 255, 255, 0.08);
-    }
-    .orb-b {
-        width: 380px;
-        height: 380px;
-        top: 220px;
-        right: 140px;
-        background: rgba(255, 255, 255, 0.06);
-    }
-    .orb-c {
-        width: 280px;
-        height: 280px;
-        bottom: 40px;
-        left: 45%;
-        background: rgba(255, 255, 255, 0.04);
-    }
-    [data-testid="stSidebar"] {
-        background:
-            linear-gradient(180deg, rgba(16, 18, 23, 0.64) 0%, rgba(20, 22, 27, 0.58) 100%);
-        backdrop-filter: blur(20px) saturate(160%);
-        -webkit-backdrop-filter: blur(20px) saturate(160%);
-        border-right: 1px solid rgba(255, 255, 255, 0.14);
-        box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04);
-        position: relative;
-        z-index: 2;
-    }
-    [data-testid="stSidebar"] * {
-        color: var(--ink);
-    }
-    [data-testid="stSidebar"] [data-baseweb="radio"] > div {
-        gap: 0.4rem;
-    }
-    [data-testid="stSidebar"] [data-baseweb="radio"] label {
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid transparent;
-        border-radius: 14px;
-        padding: 0.45rem 0.6rem;
-        transition: all 160ms ease;
-    }
-    [data-testid="stSidebar"] [data-baseweb="radio"] label:hover {
-        border-color: rgba(142, 197, 255, 0.28);
-        background: rgba(255, 255, 255, 0.08);
-    }
-    [data-testid="stMetric"],
-    [data-testid="stPlotlyChart"],
-    [data-testid="stDataFrame"],
-    .summary-card {
-        position: relative;
-        overflow: hidden;
-        isolation: isolate;
-        background: var(--glass-fill);
-        backdrop-filter: blur(2px) saturate(180%);
-        -webkit-backdrop-filter: blur(2px) saturate(180%);
-        border: 1px solid var(--glass-border);
-        box-shadow:
-            0 8px 32px var(--glass-shadow),
-            inset 0 4px 20px rgba(255, 255, 255, 0.22);
-    }
-    [data-testid="stMetric"]::after,
-    [data-testid="stPlotlyChart"]::after,
-    [data-testid="stDataFrame"]::after,
-    .summary-card::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: var(--glass-fill-soft);
-        border-radius: inherit;
-        backdrop-filter: blur(1px);
-        -webkit-backdrop-filter: blur(1px);
-        box-shadow:
-            inset -10px -8px 0 -11px rgba(255, 255, 255, 0.95),
-            inset 0 -9px 0 -8px rgba(255, 255, 255, 0.95);
-        opacity: 0.6;
-        z-index: -1;
-        filter: blur(1px) drop-shadow(10px 4px 6px rgba(0, 0, 0, 0.55)) brightness(115%);
-        pointer-events: none;
-    }
-    [data-testid="stMetric"] {
-        border-radius: 2rem;
-        padding: 1rem 1.05rem;
-    }
-    [data-testid="stMetricLabel"] {
-        color: #f7fafc;
-        opacity: 0.95;
-    }
-    [data-testid="stMetricValue"] {
-        color: var(--ink);
-        text-shadow: 0 1px 8px rgba(0, 0, 0, 0.18);
-    }
-    [data-testid="stMetricDelta"] {
-        color: var(--mint);
-    }
-    [data-testid="stPlotlyChart"] {
-        border-radius: 2rem;
-        padding: 0.85rem;
-    }
-    [data-testid="stDataFrame"] {
-        border-radius: 2rem;
-        padding: 0.35rem;
-    }
-    h1, h2, h3 {
-        color: var(--ink);
-        letter-spacing: -0.03em;
-    }
-    p, li, label, .stCaption, .stMarkdown, .stText {
-        color: var(--muted);
-    }
-    .section-title {
-        color: var(--ink);
-        font-size: 1.15rem;
-        font-weight: 800;
-        letter-spacing: -0.03em;
-        margin: 1rem 0 0.7rem 0.15rem;
-    }
-    .title {
-        color: var(--ink);
-        font-size: 2.8rem;
-        font-weight: 800;
-        line-height: 1.05;
-        margin: 0 0 1.2rem 0.15rem;
-        text-shadow: 0 2px 14px rgba(0, 0, 0, 0.24);
-    }
-    .summary-card {
-        border-radius: 2rem;
-        padding: 1rem 1.1rem;
-        color: var(--ink);
-        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.14);
-    }
-    .summary-card code {
-        background: rgba(8, 12, 22, 0.92);
-        color: var(--mint);
-        border-radius: 8px;
-        padding: 0.12rem 0.35rem;
-    }
-    </style>
-    """
-
-st.markdown(
-    CSS_TEMPLATE.replace("__BACKGROUND_B64__", BACKGROUND_B64),
-    unsafe_allow_html=True,
-)
+st.markdown(build_css(BACKGROUND_B64), unsafe_allow_html=True)
 
 st.markdown(
     """
@@ -251,26 +50,51 @@ def render_empty_state(message: str) -> None:
     st.stop()
 
 
+def matches_role_search(item: dict, query: str) -> bool:
+    if not query:
+        return True
+
+    normalized = query.strip().lower()
+    haystacks = [item["name"], *(item.get("role_aliases") or [])]
+    return any(normalized in str(value).lower() for value in haystacks)
+
+
 positions = load_position_groups()
 if not positions:
     render_empty_state("No roles found in positions.json.")
 
 with st.sidebar:
-    st.title("Role List")
-    st.caption("Choose a role family to inspect monthly trend data and technology signals.")
-    role_labels = {item["name"]: item for item in positions}
-    selected_name = st.radio("Role family", options=list(role_labels.keys()), label_visibility="collapsed")
+    search_value = st.text_input(
+        "Search roles",
+        value=st.session_state.get("role_search", ""),
+        placeholder="Search role or alias",
+        label_visibility="collapsed",
+        key="role_search",
+    )
+
+    filtered_positions = [item for item in positions if matches_role_search(item, search_value)]
+    if not filtered_positions:
+        st.caption("No roles match your search.")
+        st.stop()
+
+    role_labels = {item["name"]: item for item in filtered_positions}
+    default_role = st.session_state.get("selected_role_name", filtered_positions[0]["name"])
+    if default_role not in role_labels:
+        default_role = filtered_positions[0]["name"]
+
+    selected_name = default_role
+    with st.container():
+        st.markdown('<div class="role-list-hook"></div>', unsafe_allow_html=True)
+        for role_name in role_labels:
+            if st.button(
+                role_name,
+                key=f"role_picker_{role_labels[role_name]['id']}",
+                use_container_width=True,
+                type="secondary",
+            ):
+                st.session_state["selected_role_name"] = role_name
+                st.rerun()
     selected_role = role_labels[selected_name]
-
-    st.divider()
-    st.markdown("**Aliases included**")
-    for alias in selected_role["role_aliases"]:
-        st.write(f"- {alias}")
-
-    if selected_role.get("extra_terms"):
-        st.divider()
-        st.markdown("**Query context**")
-        st.caption(selected_role["extra_terms"])
 
 st.markdown(f'<h1 class="title">{selected_role["name"]}</h1>', unsafe_allow_html=True)
 
@@ -360,6 +184,25 @@ with col_left:
         st.plotly_chart(tech_chart, use_container_width=True)
 
 with col_right:
+    st.markdown('<div class="section-title">Aliases Included</div>', unsafe_allow_html=True)
+    aliases_html = "".join(f"<li>{alias}</li>" for alias in selected_role["role_aliases"])
+    extra_context = (
+        f'<div style="margin-top:0.8rem;color:var(--muted);"><strong>Query context</strong><br/>{selected_role.get("extra_terms")}</div>'
+        if selected_role.get("extra_terms")
+        else ""
+    )
+    st.markdown(
+        f"""
+        <div class="summary-card">
+          <ul style="margin:0; padding-left:1.1rem; line-height:1.9;">
+            {aliases_html}
+          </ul>
+          {extra_context}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.markdown('<div class="section-title">Latest Month Summary</div>', unsafe_allow_html=True)
     st.markdown(
         f"""
