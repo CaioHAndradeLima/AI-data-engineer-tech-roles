@@ -35,8 +35,8 @@ st.set_page_config(
 CSS_TEMPLATE = """
     <style>
     :root {
-        --ink: #f5f7fb;
-        --muted: #d7deea;
+        --ink: #ffffff;
+        --muted: #eef2f7;
         --glass-fill: rgba(255, 255, 255, 0.15);
         --glass-fill-soft: rgba(255, 255, 255, 0.10);
         --glass-border: rgba(255, 255, 255, 0.58);
@@ -44,24 +44,49 @@ CSS_TEMPLATE = """
         --mint: #90f3c4;
     }
     .stApp {
-        background:
-            linear-gradient(135deg, rgba(18, 20, 24, 0.52) 0%, rgba(24, 26, 31, 0.48) 46%, rgba(28, 30, 35, 0.50) 100%),
-            url("data:image/jpeg;base64,__BACKGROUND_B64__");
+        background: linear-gradient(135deg, #111317 0%, #191c22 46%, #1f232a 100%);
+        color: var(--ink);
+        position: relative;
+        overflow: hidden;
+        isolation: isolate;
+    }
+    .stApp > * {
+        position: relative;
+        z-index: 2;
+    }
+    .stApp::before {
+        content: "";
+        position: fixed;
+        inset: -40px;
+        background-image: url("data:image/jpeg;base64,__BACKGROUND_B64__");
         background-size: cover;
         background-position: center center;
-        background-attachment: fixed;
-        color: var(--ink);
+        background-repeat: no-repeat;
+        filter: blur(42px) brightness(0.42) saturate(0.82);
+        transform: scale(1.08);
+        pointer-events: none;
+        z-index: -2;
+    }
+    .stApp::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background: linear-gradient(135deg, rgba(17, 19, 23, 0.42) 0%, rgba(25, 28, 34, 0.36) 46%, rgba(31, 35, 42, 0.42) 100%);
+        pointer-events: none;
+        z-index: -1;
     }
     .block-container {
         padding-top: 1.4rem;
         padding-bottom: 2rem;
+        position: relative;
+        z-index: 3;
     }
     .ambient-orb {
         position: fixed;
         border-radius: 999px;
-        filter: blur(90px);
-        opacity: 0.14;
-        z-index: -1;
+        filter: blur(120px);
+        opacity: 0.05;
+        z-index: -3;
         pointer-events: none;
     }
     .orb-a {
@@ -92,6 +117,8 @@ CSS_TEMPLATE = """
         -webkit-backdrop-filter: blur(20px) saturate(160%);
         border-right: 1px solid rgba(255, 255, 255, 0.14);
         box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04);
+        position: relative;
+        z-index: 2;
     }
     [data-testid="stSidebar"] * {
         color: var(--ink);
@@ -149,10 +176,12 @@ CSS_TEMPLATE = """
         padding: 1rem 1.05rem;
     }
     [data-testid="stMetricLabel"] {
-        color: var(--muted);
+        color: #f7fafc;
+        opacity: 0.95;
     }
     [data-testid="stMetricValue"] {
         color: var(--ink);
+        text-shadow: 0 1px 8px rgba(0, 0, 0, 0.18);
     }
     [data-testid="stMetricDelta"] {
         color: var(--mint);
@@ -191,9 +220,10 @@ CSS_TEMPLATE = """
         border-radius: 2rem;
         padding: 1rem 1.1rem;
         color: var(--ink);
+        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.14);
     }
     .summary-card code {
-        background: rgba(8, 12, 22, 0.8);
+        background: rgba(8, 12, 22, 0.92);
         color: var(--mint);
         border-radius: 8px;
         padding: 0.12rem 0.35rem;

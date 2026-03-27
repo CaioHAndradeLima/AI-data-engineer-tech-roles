@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 PYTHON ?= python3
 
-.PHONY: env-dev env-prod bootstrap-tf-state terraform-init-dev terraform-init-prod terraform-apply-dev terraform-apply-prod install run-dev-single run-dev-all airflow-build airflow-init airflow-up airflow-down airflow-trigger-dev airflow-trigger-all-dev aws-create-keys-dev aws-create-keys-prod
+.PHONY: env-dev env-prod bootstrap-tf-state terraform-init-dev terraform-init-prod terraform-apply-dev terraform-apply-prod install run-dev-single run-dev-all airflow-build airflow-init airflow-up airflow-down airflow-trigger-dev airflow-trigger-all-dev aws-create-keys-dev aws-create-keys-prod streamlit-install streamlit-run
 
 env-dev:
 	@chmod +x scripts/create_env.sh
@@ -127,3 +127,11 @@ aws-create-keys-prod:
 	@chmod +x scripts/create_aws_access_keys.sh
 	@CREATE_USER="$${CREATE_USER:-0}" POLICY_ARN="$${POLICY_ARN:-}" \
 	  ./scripts/create_aws_access_keys.sh "$$IAM_USER" ".env.prod"
+
+streamlit-install:
+	$(PYTHON) -m pip install --upgrade pip
+	$(PYTHON) -m pip install -r streamlit/requirements.txt
+
+streamlit-run: streamlit-install
+	@export $$(grep -v '^#' .env.dev | xargs) && \
+	  STREAMLIT_ENV_FILE=.env.dev $(PYTHON) -m streamlit run streamlit/app.py
