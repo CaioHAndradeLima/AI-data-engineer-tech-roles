@@ -182,6 +182,63 @@ def build_keywords_dataframe(records: List[RoleRecord]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def build_keyword_salary_dataframe(records: List[RoleRecord]) -> pd.DataFrame:
+    rows: List[Dict[str, Any]] = []
+    for record in records:
+        for keyword, detail in record.keyword_details.items():
+            salary_bands = detail.get("salary_bands") or {}
+            rows.append(
+                {
+                    "month": record.month_label,
+                    "start_date": record.start_date,
+                    "end_date": record.end_date,
+                    "keyword": keyword,
+                    "roles_found": int(detail.get("roles_found", 0) or 0),
+                    "average_salary": (
+                        float(detail.get("average_salary"))
+                        if detail.get("average_salary") not in (None, "")
+                        else None
+                    ),
+                    "stock_options_roles": int(detail.get("stock_options_roles", 0) or 0),
+                    "tier1_roles": int(salary_bands.get("0_6000", 0) or 0),
+                    "tier2_roles": int(salary_bands.get("6000_9000", 0) or 0),
+                    "tier3_roles": int(salary_bands.get("9000_15000", 0) or 0),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def build_salary_over_time_dataframe(records: List[RoleRecord]) -> pd.DataFrame:
+    rows: List[Dict[str, Any]] = []
+    for record in records:
+        weighted_total = 0.0
+        weighted_roles = 0
+        stock_total = 0
+
+        for detail in record.keyword_details.values():
+            avg_salary = detail.get("average_salary")
+            roles_found = int(detail.get("roles_found", 0) or 0)
+            stock_total += int(detail.get("stock_options_roles", 0) or 0)
+            if avg_salary in (None, "") or roles_found <= 0:
+                continue
+            weighted_total += float(avg_salary) * roles_found
+            weighted_roles += roles_found
+
+        rows.append(
+            {
+                "month": record.month_label,
+                "start_date": record.start_date,
+                "end_date": record.end_date,
+                "average_salary": round(weighted_total / weighted_roles, 2)
+                if weighted_roles
+                else None,
+                "stock_options_roles": stock_total,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 def top_keywords_for_record(record: RoleRecord, limit: int = 10) -> pd.DataFrame:
     rows = [
         {"keyword": keyword, "count": count}
@@ -218,4 +275,6 @@ def load_role_bundle(position_id: str, position_name: str) -> Dict[str, Any]:
         "records": records,
         "positions_df": build_positions_dataframe(records),
         "keywords_df": build_keywords_dataframe(records),
+        "keyword_salary_df": build_keyword_salary_dataframe(records),
+        "salary_df": build_salary_over_time_dataframe(records),
     }
