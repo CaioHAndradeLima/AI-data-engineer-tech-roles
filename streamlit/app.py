@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -228,6 +229,7 @@ if not records:
     )
 
 latest_record = records[-1]
+latest_period_label = datetime.fromisoformat(latest_record.start_date).strftime("%B %Y")
 latest_keywords_df = top_keywords_for_record(latest_record, limit=12)
 avg_share_df = average_keyword_share(keywords_df, limit=12)
 latest_salary_row = (
@@ -240,7 +242,7 @@ latest_stock_roles = int(latest_salary_row.get("stock_options_roles", 0) or 0)
 
 metric_1, metric_2, metric_3, metric_4 = st.columns(4)
 metric_1.metric(
-    "Positions Found In Latest Month",
+    f"Positions Found In {latest_period_label}",
     f"{latest_record.total_positions:,}",
     latest_record.month_label,
 )
@@ -298,9 +300,12 @@ with col_left:
         )
         st.plotly_chart(radar_chart, use_container_width=True)
 
-    st.markdown('<div class="section-title">Technology Presence In Latest Month</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="section-title">Technology Presence In {latest_period_label}</div>',
+        unsafe_allow_html=True,
+    )
     if latest_keywords_df.empty:
-        st.info("No keyword data available for the latest month.")
+        st.info(f"No keyword data available for {latest_period_label}.")
     else:
         tech_chart = px.bar(
             latest_keywords_df.sort_values("count"),
@@ -344,7 +349,10 @@ with col_right:
         unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="section-title">Latest Month Summary</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="section-title">{latest_period_label} Summary</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         f"""
         <div class="summary-card">
@@ -357,7 +365,10 @@ with col_right:
     )
     st.caption(latest_record.note or "No additional note available.")
 
-    st.markdown('<div class="section-title">Latest Salary Snapshot</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="section-title">{latest_period_label} Salary Snapshot</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown(
         f"""
         <div class="summary-card">
@@ -436,12 +447,17 @@ else:
     )
     trend_df = keywords_df[keywords_df["keyword"].isin(top_keywords)].copy()
     trend_df["share_pct"] = (trend_df["share"] * 100).round(1)
+    trend_df["point_label"] = trend_df.apply(
+        lambda row: f"{row['share_pct']}% · {int(row['count'])}",
+        axis=1,
+    )
     trend_chart = px.line(
         trend_df,
         x="month",
         y="share_pct",
         color="keyword",
         markers=True,
+        text="point_label",
         line_shape="spline",
         color_discrete_sequence=[
             "#0f766e",
@@ -465,6 +481,16 @@ else:
         font=dict(color="#eef2ff"),
         xaxis=dict(gridcolor="rgba(255,255,255,0.08)", zerolinecolor="rgba(255,255,255,0.08)"),
         yaxis=dict(gridcolor="rgba(255,255,255,0.12)", zerolinecolor="rgba(255,255,255,0.08)"),
+    )
+    trend_chart.update_traces(
+        textposition="top center",
+        hovertemplate=(
+            "<b>%{fullData.name}</b><br>"
+            "Month: %{x}<br>"
+            "Share: %{y:.1f}%<br>"
+            "Roles found: %{customdata[0]}<extra></extra>"
+        ),
+        customdata=trend_df[["count"]].to_numpy(),
     )
     st.plotly_chart(trend_chart, use_container_width=True)
 
