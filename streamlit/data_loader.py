@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import boto3
 import pandas as pd
+import streamlit as st
 from botocore.exceptions import BotoCoreError, ClientError
 from dotenv import load_dotenv
 
@@ -36,6 +37,22 @@ def load_runtime_env() -> None:
     env_path = os.getenv("STREAMLIT_ENV_FILE", str(DEFAULT_ENV_PATH))
     if Path(env_path).exists():
         load_dotenv(env_path, override=False)
+
+    # Streamlit Community Cloud secrets support.
+    try:
+        secret_mappings = {
+            "AWS_ACCESS_KEY_ID": st.secrets.get("AWS_ACCESS_KEY_ID"),
+            "AWS_SECRET_ACCESS_KEY": st.secrets.get("AWS_SECRET_ACCESS_KEY"),
+            "AWS_SESSION_TOKEN": st.secrets.get("AWS_SESSION_TOKEN"),
+            "AWS_REGION": st.secrets.get("AWS_REGION"),
+            "OUTPUT_BUCKET": st.secrets.get("OUTPUT_BUCKET"),
+        }
+    except Exception:  # noqa: BLE001
+        secret_mappings = {}
+
+    for key, value in secret_mappings.items():
+        if value and not os.getenv(key):
+            os.environ[key] = str(value)
 
 
 def load_position_groups() -> List[Dict[str, Any]]:
