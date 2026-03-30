@@ -52,6 +52,90 @@ def render_empty_state(message: str) -> None:
     st.stop()
 
 
+@st.fragment
+def render_keyword_salary_explorer(keyword_salary_df: pd.DataFrame) -> None:
+    st.markdown('<div class="section-title">Keyword Salary Explorer</div>', unsafe_allow_html=True)
+    if keyword_salary_df.empty:
+        st.info("No keyword salary history available yet.")
+        return
+
+    keyword_options = sorted(keyword_salary_df["keyword"].dropna().unique().tolist())
+    default_keyword = keyword_options[0] if keyword_options else None
+    selected_keyword = st.selectbox(
+        "Pick a keyword",
+        options=keyword_options,
+        index=keyword_options.index(default_keyword) if default_keyword else 0,
+        key="salary_keyword_selector",
+    )
+    selected_keyword_df = keyword_salary_df[keyword_salary_df["keyword"] == selected_keyword].copy()
+
+    keyword_col_left, keyword_col_right = st.columns([1.0, 1.15], gap="large")
+
+    with keyword_col_left:
+        keyword_salary_chart = px.line(
+            selected_keyword_df.dropna(subset=["average_salary"]),
+            x="month",
+            y="average_salary",
+            markers=True,
+            line_shape="spline",
+            color_discrete_sequence=["#22c55e"],
+        )
+        keyword_salary_chart.update_layout(
+            height=340,
+            margin=dict(l=20, r=20, t=10, b=20),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(255,255,255,0.045)",
+            xaxis_title="Month",
+            yaxis_title=f"{selected_keyword} Avg Salary (USD / month)",
+            font=dict(color="#eef2ff"),
+            xaxis=dict(gridcolor="rgba(255,255,255,0.08)", zerolinecolor="rgba(255,255,255,0.08)"),
+            yaxis=dict(gridcolor="rgba(255,255,255,0.14)", zerolinecolor="rgba(255,255,255,0.08)"),
+        )
+        st.plotly_chart(keyword_salary_chart, use_container_width=True)
+
+    with keyword_col_right:
+        tier_df = selected_keyword_df.melt(
+            id_vars=["month"],
+            value_vars=["tier1_roles", "tier2_roles", "tier3_roles", "stock_options_roles"],
+            var_name="metric",
+            value_name="count",
+        )
+        tier_labels = {
+            "tier1_roles": "Tier 1 (0-6000)",
+            "tier2_roles": "Tier 2 (6000-9000)",
+            "tier3_roles": "Tier 3 (9000-15000)",
+            "stock_options_roles": "Stock Options",
+        }
+        tier_df["metric"] = tier_df["metric"].map(tier_labels)
+        tier_chart = px.line(
+            tier_df,
+            x="month",
+            y="count",
+            color="metric",
+            markers=True,
+            line_shape="spline",
+            color_discrete_map={
+                "Tier 1 (0-6000)": "#fbbf24",
+                "Tier 2 (6000-9000)": "#fb923c",
+                "Tier 3 (9000-15000)": "#ef4444",
+                "Stock Options": "#38bdf8",
+            },
+        )
+        tier_chart.update_layout(
+            height=340,
+            margin=dict(l=20, r=20, t=10, b=20),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(255,255,255,0.045)",
+            xaxis_title="Month",
+            yaxis_title="Estimated Roles By Salary Tier / Stock Options",
+            legend_title="Metric",
+            font=dict(color="#eef2ff"),
+            xaxis=dict(gridcolor="rgba(255,255,255,0.08)", zerolinecolor="rgba(255,255,255,0.08)"),
+            yaxis=dict(gridcolor="rgba(255,255,255,0.12)", zerolinecolor="rgba(255,255,255,0.08)"),
+        )
+        st.plotly_chart(tier_chart, use_container_width=True)
+
+
 def matches_role_search(item: dict, query: str) -> bool:
     if not query:
         return True
@@ -384,85 +468,7 @@ else:
     )
     st.plotly_chart(trend_chart, use_container_width=True)
 
-st.markdown('<div class="section-title">Keyword Salary Explorer</div>', unsafe_allow_html=True)
-if keyword_salary_df.empty:
-    st.info("No keyword salary history available yet.")
-else:
-    keyword_options = sorted(keyword_salary_df["keyword"].dropna().unique().tolist())
-    default_keyword = keyword_options[0] if keyword_options else None
-    selected_keyword = st.selectbox(
-        "Pick a keyword",
-        options=keyword_options,
-        index=keyword_options.index(default_keyword) if default_keyword else 0,
-        key="salary_keyword_selector",
-    )
-    selected_keyword_df = keyword_salary_df[keyword_salary_df["keyword"] == selected_keyword].copy()
-
-    keyword_col_left, keyword_col_right = st.columns([1.0, 1.15], gap="large")
-
-    with keyword_col_left:
-        keyword_salary_chart = px.line(
-            selected_keyword_df.dropna(subset=["average_salary"]),
-            x="month",
-            y="average_salary",
-            markers=True,
-            line_shape="spline",
-            color_discrete_sequence=["#22c55e"],
-        )
-        keyword_salary_chart.update_layout(
-            height=340,
-            margin=dict(l=20, r=20, t=10, b=20),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(255,255,255,0.045)",
-            xaxis_title="Month",
-            yaxis_title=f"{selected_keyword} Avg Salary (USD / month)",
-            font=dict(color="#eef2ff"),
-            xaxis=dict(gridcolor="rgba(255,255,255,0.08)", zerolinecolor="rgba(255,255,255,0.08)"),
-            yaxis=dict(gridcolor="rgba(255,255,255,0.14)", zerolinecolor="rgba(255,255,255,0.08)"),
-        )
-        st.plotly_chart(keyword_salary_chart, use_container_width=True)
-
-    with keyword_col_right:
-        tier_df = selected_keyword_df.melt(
-            id_vars=["month"],
-            value_vars=["tier1_roles", "tier2_roles", "tier3_roles", "stock_options_roles"],
-            var_name="metric",
-            value_name="count",
-        )
-        tier_labels = {
-            "tier1_roles": "Tier 1 (0-6000)",
-            "tier2_roles": "Tier 2 (6000-9000)",
-            "tier3_roles": "Tier 3 (9000-15000)",
-            "stock_options_roles": "Stock Options",
-        }
-        tier_df["metric"] = tier_df["metric"].map(tier_labels)
-        tier_chart = px.line(
-            tier_df,
-            x="month",
-            y="count",
-            color="metric",
-            markers=True,
-            line_shape="spline",
-            color_discrete_map={
-                "Tier 1 (0-6000)": "#fbbf24",
-                "Tier 2 (6000-9000)": "#fb923c",
-                "Tier 3 (9000-15000)": "#ef4444",
-                "Stock Options": "#38bdf8",
-            },
-        )
-        tier_chart.update_layout(
-            height=340,
-            margin=dict(l=20, r=20, t=10, b=20),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(255,255,255,0.045)",
-            xaxis_title="Month",
-            yaxis_title="Estimated Roles By Salary Tier / Stock Options",
-            legend_title="Metric",
-            font=dict(color="#eef2ff"),
-            xaxis=dict(gridcolor="rgba(255,255,255,0.08)", zerolinecolor="rgba(255,255,255,0.08)"),
-            yaxis=dict(gridcolor="rgba(255,255,255,0.12)", zerolinecolor="rgba(255,255,255,0.08)"),
-        )
-        st.plotly_chart(tier_chart, use_container_width=True)
+render_keyword_salary_explorer(keyword_salary_df)
 
 st.caption(
     f"Data source: S3 bucket `{bundle['bucket']}`. Role families come from `{Path('positions.json')}`."
