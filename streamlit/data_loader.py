@@ -23,6 +23,7 @@ class RoleRecord:
     end_date: str
     total_positions: int
     keywords: Dict[str, int]
+    keyword_details: Dict[str, Dict[str, Any]]
     note: str
     s3_key: str
 
@@ -90,16 +91,47 @@ def _parse_record(position_name: str, position_id: str, key: str, payload: Dict[
     parts = key.split("/")
     start_date = parts[3] if len(parts) > 3 else ""
     end_date = parts[4] if len(parts) > 4 else ""
+    raw_keywords = payload.get("keywords") or {}
+    keyword_details: Dict[str, Dict[str, Any]] = {}
+    keyword_counts: Dict[str, int] = {}
+
+    for keyword, raw_value in raw_keywords.items():
+        if isinstance(raw_value, dict):
+            roles_found = int(raw_value.get("roles_found", raw_value.get("count", 0)) or 0)
+            detail = {
+                "roles_found": roles_found,
+                "salary_bands": {
+                    "0_6000": int(((raw_value.get("salary_bands") or {}).get("0_6000", 0)) or 0),
+                    "6000_9000": int(((raw_value.get("salary_bands") or {}).get("6000_9000", 0)) or 0),
+                    "9000_15000": int(((raw_value.get("salary_bands") or {}).get("9000_15000", 0)) or 0),
+                },
+                "average_salary": raw_value.get("average_salary"),
+                "stock_options_roles": int(raw_value.get("stock_options_roles", 0) or 0),
+            }
+        else:
+            roles_found = int(raw_value or 0)
+            detail = {
+                "roles_found": roles_found,
+                "salary_bands": {
+                    "0_6000": 0,
+                    "6000_9000": 0,
+                    "9000_15000": 0,
+                },
+                "average_salary": None,
+                "stock_options_roles": 0,
+            }
+
+        keyword_counts[str(keyword)] = roles_found
+        keyword_details[str(keyword)] = detail
+
     return RoleRecord(
         position_id=position_id,
         role_name=position_name,
         start_date=start_date,
         end_date=end_date,
         total_positions=int(payload.get("total_positions", 0) or 0),
-        keywords={
-            str(keyword): int(value or 0)
-            for keyword, value in (payload.get("keywords") or {}).items()
-        },
+        keywords=keyword_counts,
+        keyword_details=keyword_details,
         note=str(payload.get("note", "")),
         s3_key=key,
     )
@@ -187,4 +219,3 @@ def load_role_bundle(position_id: str, position_name: str) -> Dict[str, Any]:
         "positions_df": build_positions_dataframe(records),
         "keywords_df": build_keywords_dataframe(records),
     }
-

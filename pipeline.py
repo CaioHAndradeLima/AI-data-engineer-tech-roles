@@ -17,6 +17,93 @@ GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
 GENAI_CLIENT: Optional[genai.Client] = None
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_keyword_metrics(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize Gemini keyword payloads.
+
+    Supports both:
+    - legacy shape: {"SQL": 1000}
+    - new shape:
+      {
+        "SQL": {
+          "roles_found": 1000,
+          "salary_bands": {
+            "0_6000": 300,
+            "6000_9000": 500,
+            "9000_15000": 200
+          },
+          "average_salary": 7352,
+          "stock_options_roles": 32
+        }
+      }
+    """
+    raw_keywords = payload.get("keywords") or {}
+    normalized: Dict[str, Any] = {}
+
+    for keyword, raw_value in raw_keywords.items():
+        keyword_name = str(keyword).strip()
+        if not keyword_name:
+            continue
+
+        if isinstance(raw_value, dict):
+            normalized[keyword_name] = {
+                "roles_found": _safe_int(
+                    raw_value.get("roles_found", raw_value.get("count", 0))
+                ),
+                "salary_bands": {
+                    "0_6000": _safe_int(
+                        (raw_value.get("salary_bands") or {}).get("0_6000")
+                        or raw_value.get("amount_roles_found_between_0k_6k")
+                    ),
+                    "6000_9000": _safe_int(
+                        (raw_value.get("salary_bands") or {}).get("6000_9000")
+                        or raw_value.get("amount_roles_found_between_6k_9k")
+                    ),
+                    "9000_15000": _safe_int(
+                        (raw_value.get("salary_bands") or {}).get("9000_15000")
+                        or raw_value.get("amount_roles_found_between_9k_15k")
+                    ),
+                },
+                "average_salary": _safe_float(raw_value.get("average_salary")),
+                "stock_options_roles": _safe_int(
+                    raw_value.get("stock_options_roles")
+                    or raw_value.get("amount_roles_found_with_stock_options")
+                ),
+            }
+        else:
+            normalized[keyword_name] = {
+                "roles_found": _safe_int(raw_value),
+                "salary_bands": {
+                    "0_6000": 0,
+                    "6000_9000": 0,
+                    "9000_15000": 0,
+                },
+                "average_salary": None,
+                "stock_options_roles": 0,
+            }
+
+    payload["keywords"] = normalized
+    return payload
+
+
 def normalize_position_id(position_name: str) -> str:
     return position_name.strip().lower().replace(" ", "_")
 
@@ -310,12 +397,26 @@ Task:
    LATAM, build an approximate frequency table of the most relevant tools,
    technologies, or skills (e.g. Python, SQL, Snowflake, Terraform, dbt,
    Airflow, etc.) that would appear in those postings.
-4. Return ONLY a JSON object with this structure (no extra text):
+4. For each keyword, estimate:
+   - how many roles mention that keyword,
+   - how many of those roles fall into these monthly USD salary bands:
+     0-6000, 6000-9000, 9000-15000,
+   - the average monthly USD salary for roles mentioning that keyword,
+   - how many of those roles include stock options as part of compensation.
+5. Return ONLY a JSON object with this structure (no extra text):
 {{
   "total_positions": <int>,  // your estimated count of positions
   "keywords": {{
-    "<keyword>": <int>,      // approximate number of positions where this keyword appears
-    "...": <int>
+    "<keyword>": {{
+      "roles_found": <int>,
+      "salary_bands": {{
+        "0_6000": <int>,
+        "6000_9000": <int>,
+        "9000_15000": <int>
+      }},
+      "average_salary": <number>,
+      "stock_options_roles": <int>
+    }}
   }}
 }}
 """
@@ -343,6 +444,7 @@ Task:
     if not isinstance(parsed, dict) or "total_positions" not in parsed:
         raise ValueError(f"Gemini JSON missing 'total_positions': {parsed}")
 
+    normalize_keyword_metrics(parsed)
     parsed.setdefault(
         "note",
         "AI-only estimate generated directly by Gemini, "
