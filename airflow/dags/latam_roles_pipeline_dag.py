@@ -90,7 +90,7 @@ def _run_gemini_with_retries(
     end_date: str,
     extra_terms: str | None,
     role_aliases: List[str],
-    retries: int = 2,
+    retries: int = 10,
 ):
     attempts = retries + 1
     last_error = None
@@ -248,7 +248,7 @@ def latam_roles_pipeline():
                 end_date=end_date,
                 extra_terms=extra_terms,
                 role_aliases=role_aliases,
-                retries=2,
+                retries=10,
             )
         except Exception as exc:  # noqa: BLE001
             raise RuntimeError(
