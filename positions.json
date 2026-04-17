@@ -2,23 +2,158 @@
   "position_groups": [
     {
       "id": "data_engineer",
-      "role": ["Data Engineer", "Senior Data Engineer", "Mid Data Engineer"],
-      "extra_terms": "Python SQL ETL"
+      "role": [
+        "Data Engineer",
+        "Senior Data Engineer",
+        "Big Data Engineer",
+        "Data Infrastructure Engineer"
+      ],
+      "extra_terms": "Python SQL ETL Snowflake Airbyte Spark dbt"
     },
     {
       "id": "ai_engineer",
-      "role": ["AI Engineer", "Senior AI Engineer", "ML Engineer"],
-      "extra_terms": "LLM MLOps Python"
-    },
-    {
-      "id": "data_analyst",
-      "role": ["Data Analyst", "Senior Data Analyst", "BI Analyst"],
-      "extra_terms": "BI analytics SQL"
+      "role": [
+        "AI Engineer",
+        "Senior AI Engineer",
+        "Generative AI Engineer",
+        "LLM Engineer",
+        "Machine Learning Engineer"
+      ],
+      "extra_terms": "LLM MLOps Python PyTorch LangChain OpenAI RAG"
     },
     {
       "id": "android_developer",
-      "role": ["Android Developer", "Android Engineer", "Senior Android Engineer", "Senior Android Developer"],
-      "extra_terms": "jetpack compose"
+      "role": [
+        "Android Developer",
+        "Android Engineer",
+        "Senior Android Engineer",
+        "Mobile Engineer (Android)",
+        "Android Software Engineer"
+      ],
+      "extra_terms": "jetpack compose kotlin java android-sdk coroutines"
+    },
+    {
+      "id": "ios_developer",
+      "role": [
+        "iOS Developer",
+        "iOS Engineer",
+        "Senior iOS Engineer",
+        "Swift Developer",
+        "iOS Software Engineer"
+      ],
+      "extra_terms": "Swift SwiftUI UIKit Xcode Objective-C CoreData Combine"
+    },
+    {
+      "id": "mobile_engineer",
+      "role": [
+        "Mobile Engineer",
+        "Mobile Software Engineer",
+        "Cross-platform Developer",
+        "Flutter Developer",
+        "React Native Developer",
+        "Mobile Solutions Architect"
+      ],
+      "extra_terms": "Flutter Dart React Native TypeScript Kotlin Multiplatform KMP"
+    },
+    {
+      "id": "frontend_developer",
+      "role": [
+        "Frontend Developer",
+        "Frontend Engineer",
+        "Web Developer",
+        "UI Engineer",
+        "Senior Frontend Developer"
+      ],
+      "extra_terms": "React TypeScript Next.js Tailwind CSS JavaScript"
+    },
+    {
+      "id": "backend_developer",
+      "role": [
+        "Backend Developer",
+        "Backend Engineer",
+        "Software Engineer (Backend)",
+        "Server-side Developer"
+      ],
+      "extra_terms": "Node.js Python Go Java Spring Boot Microservices API"
+    },
+    {
+      "id": "fullstack_developer",
+      "role": [
+        "Fullstack Developer",
+        "Fullstack Engineer",
+        "Software Engineer",
+        "Product Engineer"
+      ],
+      "extra_terms": "MERN PERN Full-stack Software Development"
+    },
+    {
+      "id": "software_architect",
+      "role": [
+        "Software Architect",
+        "Solutions Architect",
+        "System Architect",
+        "Technical Architect"
+      ],
+      "extra_terms": "System Design Design Patterns Distributed Systems Scalability"
+    },
+    {
+      "id": "data_scientist",
+      "role": [
+        "Data Scientist",
+        "Applied Scientist",
+        "Research Scientist",
+        "ML Scientist"
+      ],
+      "extra_terms": "Statistics Modeling Python R Notebooks Forecasting"
+    },
+    {
+      "id": "data_analyst",
+      "role": [
+        "Data Analyst",
+        "Senior Data Analyst",
+        "BI Analyst",
+        "Business Intelligence Developer"
+      ],
+      "extra_terms": "BI analytics SQL Tableau PowerBI Looker"
+    },
+    {
+      "id": "devops_engineer",
+      "role": [
+        "DevOps Engineer",
+        "Site Reliability Engineer (SRE)",
+        "Platform Engineer",
+        "Cloud Engineer"
+      ],
+      "extra_terms": "CI/CD Kubernetes Docker AWS Azure Terraform IaC"
+    },
+    {
+      "id": "cloud_architect",
+      "role": [
+        "Cloud Architect",
+        "Cloud Solutions Architect",
+        "Cloud Infrastructure Architect"
+      ],
+      "extra_terms": "GCP AWS Azure Multi-cloud Cloud Migration Serverless"
+    },
+    {
+      "id": "security_engineer",
+      "role": [
+        "Security Engineer",
+        "Application Security Engineer",
+        "Cybersecurity Analyst",
+        "DevSecOps Engineer"
+      ],
+      "extra_terms": "SOC Pentesting Encryption OAuth OWASP Vulnerability"
+    },
+    {
+      "id": "qa_automation",
+      "role": [
+        "QA Engineer",
+        "SDET",
+        "Automation Engineer",
+        "Quality Assurance Engineer"
+      ],
+      "extra_terms": "Selenium Cypress Playwright Unit Testing Integration Testing"
     }
   ]
 }
