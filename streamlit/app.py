@@ -22,6 +22,8 @@ from theme import build_css
 
 load_runtime_env()
 
+PLOTLY_CONFIG: dict = {"responsive": True, "displayModeBar": True}
+
 BACKGROUND_IMAGE = Path(__file__).resolve().parent / "assets-dark.jpg"
 BACKGROUND_B64 = (
     base64.b64encode(BACKGROUND_IMAGE.read_bytes()).decode("utf-8")
@@ -51,6 +53,29 @@ st.markdown(
 def render_empty_state(message: str) -> None:
     st.warning(message)
     st.stop()
+
+
+TECH_TREND_PERIOD_OPTIONS: tuple[str, ...] = (
+    "Last 3 months",
+    "Last 6 months",
+    "Last 1 year",
+)
+TECH_TREND_PERIOD_MONTHS: dict[str, int] = {
+    "Last 3 months": 3,
+    "Last 6 months": 6,
+    "Last 1 year": 12,
+}
+
+
+def filter_keywords_to_last_n_distinct_months(df: pd.DataFrame, n_months: int) -> pd.DataFrame:
+    """Keep rows whose `month` falls in the last n distinct YYYY-MM values (data order)."""
+    if df.empty or n_months <= 0:
+        return df.copy()
+    months = sorted({str(m) for m in df["month"].dropna().unique()})
+    if not months:
+        return df.copy()
+    keep = months[-n_months:] if len(months) > n_months else months
+    return df[df["month"].astype(str).isin(keep)].copy()
 
 
 @st.fragment
@@ -92,7 +117,7 @@ def render_keyword_salary_explorer(keyword_salary_df: pd.DataFrame) -> None:
             xaxis=dict(gridcolor="rgba(255,255,255,0.08)", zerolinecolor="rgba(255,255,255,0.08)"),
             yaxis=dict(gridcolor="rgba(255,255,255,0.14)", zerolinecolor="rgba(255,255,255,0.08)"),
         )
-        st.plotly_chart(keyword_salary_chart, use_container_width=True)
+        st.plotly_chart(keyword_salary_chart, use_container_width=True, config=PLOTLY_CONFIG)
 
     with keyword_col_right:
         tier_df = selected_keyword_df.melt(
@@ -134,7 +159,7 @@ def render_keyword_salary_explorer(keyword_salary_df: pd.DataFrame) -> None:
             xaxis=dict(gridcolor="rgba(255,255,255,0.08)", zerolinecolor="rgba(255,255,255,0.08)"),
             yaxis=dict(gridcolor="rgba(255,255,255,0.12)", zerolinecolor="rgba(255,255,255,0.08)"),
         )
-        st.plotly_chart(tier_chart, use_container_width=True)
+        st.plotly_chart(tier_chart, use_container_width=True, config=PLOTLY_CONFIG)
 
 
 def matches_role_search(item: dict, query: str) -> bool:
@@ -203,8 +228,16 @@ components.html(
         }, 90);
       });
     }
-    bindInstantSearch();
-    new MutationObserver(bindInstantSearch).observe(root.body, {childList: true, subtree: true});
+    function attachSidebarObserver() {
+      const sb = root.querySelector('[data-testid="stSidebar"]');
+      if (!sb) {
+        window.setTimeout(attachSidebarObserver, 200);
+        return;
+      }
+      bindInstantSearch();
+      new MutationObserver(bindInstantSearch).observe(sb, {childList: true, subtree: true});
+    }
+    attachSidebarObserver();
     </script>
     """,
     height=0,
@@ -298,7 +331,7 @@ with col_left:
             coloraxis_showscale=False,
             font=dict(color="#eef2ff"),
         )
-        st.plotly_chart(radar_chart, use_container_width=True)
+        st.plotly_chart(radar_chart, use_container_width=True, config=PLOTLY_CONFIG)
 
     st.markdown(
         f'<div class="section-title">Technology Presence In {latest_period_label}</div>',
@@ -327,7 +360,7 @@ with col_left:
             xaxis=dict(gridcolor="rgba(255,255,255,0.08)", zerolinecolor="rgba(255,255,255,0.08)"),
             yaxis=dict(gridcolor="rgba(255,255,255,0.05)", zerolinecolor="rgba(255,255,255,0.05)"),
         )
-        st.plotly_chart(tech_chart, use_container_width=True)
+        st.plotly_chart(tech_chart, use_container_width=True, config=PLOTLY_CONFIG)
 
 with col_right:
     st.markdown('<div class="section-title">Aliases Included</div>', unsafe_allow_html=True)
@@ -410,7 +443,7 @@ else:
         xaxis=dict(gridcolor="rgba(255,255,255,0.08)", zerolinecolor="rgba(255,255,255,0.08)"),
         yaxis=dict(gridcolor="rgba(255,255,255,0.14)", zerolinecolor="rgba(255,255,255,0.08)"),
     )
-    st.plotly_chart(salary_chart, use_container_width=True)
+    st.plotly_chart(salary_chart, use_container_width=True, config=PLOTLY_CONFIG)
 
 st.markdown('<div class="section-title">Positions Over Time</div>', unsafe_allow_html=True)
 positions_chart = px.line(
@@ -432,67 +465,82 @@ positions_chart.update_layout(
     xaxis=dict(gridcolor="rgba(255,255,255,0.08)", zerolinecolor="rgba(255,255,255,0.08)"),
     yaxis=dict(gridcolor="rgba(255,255,255,0.14)", zerolinecolor="rgba(255,255,255,0.08)"),
 )
-st.plotly_chart(positions_chart, use_container_width=True)
+st.plotly_chart(positions_chart, use_container_width=True, config=PLOTLY_CONFIG)
 
 st.markdown('<div class="section-title">Technology Trend By Month</div>', unsafe_allow_html=True)
 if keywords_df.empty:
     st.info("No historical keyword data found.")
 else:
-    top_keywords = (
-        keywords_df.groupby("keyword", as_index=False)["count"]
-        .sum()
-        .sort_values("count", ascending=False)
-        .head(8)["keyword"]
-        .tolist()
+    if "tech_trend_period" not in st.session_state:
+        st.session_state["tech_trend_period"] = "Last 1 year"
+    st.radio(
+        "Research by",
+        options=list(TECH_TREND_PERIOD_OPTIONS),
+        key="tech_trend_period",
+        horizontal=True,
     )
-    trend_df = keywords_df[keywords_df["keyword"].isin(top_keywords)].copy()
-    trend_df["share_pct"] = (trend_df["share"] * 100).round(1)
-    trend_df["point_label"] = trend_df.apply(
-        lambda row: f"{row['share_pct']}% · {int(row['count'])}",
-        axis=1,
+    n_months_window = TECH_TREND_PERIOD_MONTHS.get(
+        st.session_state["tech_trend_period"], 12
     )
-    trend_chart = px.line(
-        trend_df,
-        x="month",
-        y="share_pct",
-        color="keyword",
-        markers=True,
-        text="point_label",
-        line_shape="spline",
-        color_discrete_sequence=[
-            "#0f766e",
-            "#2563eb",
-            "#b45309",
-            "#dc2626",
-            "#7c3aed",
-            "#059669",
-            "#ea580c",
-            "#1d4ed8",
-        ],
-    )
-    trend_chart.update_layout(
-        height=420,
-        margin=dict(l=20, r=20, t=10, b=20),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(255,255,255,0.045)",
-        xaxis_title="Month",
-        yaxis_title="Share Of Positions Mentioning Technology (%)",
-        legend_title="Technology",
-        font=dict(color="#eef2ff"),
-        xaxis=dict(gridcolor="rgba(255,255,255,0.08)", zerolinecolor="rgba(255,255,255,0.08)"),
-        yaxis=dict(gridcolor="rgba(255,255,255,0.12)", zerolinecolor="rgba(255,255,255,0.08)"),
-    )
-    trend_chart.update_traces(
-        textposition="top center",
-        hovertemplate=(
-            "<b>%{fullData.name}</b><br>"
-            "Month: %{x}<br>"
-            "Share: %{y:.1f}%<br>"
-            "Roles found: %{customdata[0]}<extra></extra>"
-        ),
-        customdata=trend_df[["count"]].to_numpy(),
-    )
-    st.plotly_chart(trend_chart, use_container_width=True)
+    keywords_windowed = filter_keywords_to_last_n_distinct_months(keywords_df, n_months_window)
+    if keywords_windowed.empty:
+        st.info("No keyword data in the selected period.")
+    else:
+        top_keywords = (
+            keywords_windowed.groupby("keyword", as_index=False)["count"]
+            .sum()
+            .sort_values("count", ascending=False)
+            .head(8)["keyword"]
+            .tolist()
+        )
+        trend_df = keywords_windowed[keywords_windowed["keyword"].isin(top_keywords)].copy()
+        trend_df["share_pct"] = (trend_df["share"] * 100).round(1)
+        trend_df["point_label"] = trend_df.apply(
+            lambda row: f"{row['share_pct']}% · {int(row['count'])}",
+            axis=1,
+        )
+        trend_chart = px.line(
+            trend_df,
+            x="month",
+            y="share_pct",
+            color="keyword",
+            markers=True,
+            text="point_label",
+            line_shape="spline",
+            color_discrete_sequence=[
+                "#0f766e",
+                "#2563eb",
+                "#b45309",
+                "#dc2626",
+                "#7c3aed",
+                "#059669",
+                "#ea580c",
+                "#1d4ed8",
+            ],
+        )
+        trend_chart.update_layout(
+            height=420,
+            margin=dict(l=20, r=20, t=10, b=20),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(255,255,255,0.045)",
+            xaxis_title="Month",
+            yaxis_title="Share Of Positions Mentioning Technology (%)",
+            legend_title="Technology",
+            font=dict(color="#eef2ff"),
+            xaxis=dict(gridcolor="rgba(255,255,255,0.08)", zerolinecolor="rgba(255,255,255,0.08)"),
+            yaxis=dict(gridcolor="rgba(255,255,255,0.12)", zerolinecolor="rgba(255,255,255,0.08)"),
+        )
+        trend_chart.update_traces(
+            textposition="top center",
+            hovertemplate=(
+                "<b>%{fullData.name}</b><br>"
+                "Month: %{x}<br>"
+                "Share: %{y:.1f}%<br>"
+                "Roles found: %{customdata[0]}<extra></extra>"
+            ),
+            customdata=trend_df[["count"]].to_numpy(),
+        )
+        st.plotly_chart(trend_chart, use_container_width=True, config=PLOTLY_CONFIG)
 
 render_keyword_salary_explorer(keyword_salary_df)
 
